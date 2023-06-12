@@ -1,4 +1,5 @@
 { lib
+, config ? {}
 , ...
 }:
 
@@ -24,129 +25,147 @@ data types:
 */
 
 let
-  submodule' = { options, finalMerge ? lib.id, skipNulls ? true, chk ? (_: true) }: submoduleWith' {
-    shorthandOnlyDefinesConfig = true;
-    modules = lib.toList {
-      inherit options;
+  cfg = config.notnftConfig or {};
+  enumMode = cfg.enumMode or "normal";
+  laxEnums = enumMode == "lax";
+  strictEnums = enumMode == "strict";
+  submodule' = { options, finalMerge ? lib.id, skipNulls ? true }:
+  let
+    reqFields = builtins.attrNames (if skipNulls then lib.filterAttrs (k: v: v.type.name != "nullOr") options else options);
+    optFields = if skipNulls then builtins.attrNames (lib.filterAttrs (k: v: v.type.name == "nullOr") options) else [];
+    reqFieldsDesc =
+      if reqFields == [] then null
+      else if builtins.length reqFields == 1 then ''field "${builtins.head reqFields}"''
+      else "fields ${builtins.concatStringsSep ", " (map (x: ''"${x}"'') reqFields)}";
+    optFieldsDesc =
+      if optFields == [] then null
+      else if builtins.length optFields == 1 then ''optional field "${builtins.head optFields}"''
+      else "optional fields ${builtins.concatStringsSep ", " (map (x: ''"${x}"'') optFields)}";
+  in
+    submoduleWith' {
+      shorthandOnlyDefinesConfig = true;
+      modules = lib.toList {
+        inherit options;
+      };
+      description = "submodule with ${builtins.concatStringsSep " and " (builtins.filter builtins.isString [ reqFieldsDesc optFieldsDesc ])}";
+      descriptionClass = "conjunction";
+      chk = x: builtins.all (optName: x?${optName}) reqFields;
+      inherit finalMerge skipNulls;
     };
-    inherit finalMerge skipNulls chk;
-  };
   submoduleSK = key: val: submodule' {
     skipNulls = false;
-    options = {
-      ${key} = val;
-    };
-    chk = x: x?${key};
+    options.${key} = val;
   };
   submoduleWith' =
-      { modules
-      , specialArgs ? {}
-      , shorthandOnlyDefinesConfig ? false
-      , description ? null
-      , class ? null
-      , finalMerge ? lib.id
-      , skipNulls ? true
-      , chk ? (_: true)
-      }@attrs:
-      let
-        inherit (lib.modules) evalModules;
+    { modules
+    , specialArgs ? {}
+    , shorthandOnlyDefinesConfig ? false
+    , description ? null
+    , descriptionClass ? "noun"
+    , class ? null
+    , finalMerge ? lib.id
+    , skipNulls ? true
+    , chk ? (_: true)
+    }@attrs:
+    let
+      inherit (lib.modules) evalModules;
 
-        allModules = defs: map ({ value, file }:
-          if builtins.isAttrs value && shorthandOnlyDefinesConfig
-          then { _file = file; config = value; }
-          else { _file = file; imports = [ value ]; }
-        ) defs;
+      allModules = defs: map ({ value, file }:
+        if builtins.isAttrs value && shorthandOnlyDefinesConfig
+        then { _file = file; config = value; }
+        else { _file = file; imports = [ value ]; }
+      ) defs;
 
-        base = evalModules {
-          inherit class specialArgs;
-          modules = [{
-            # This is a work-around for the fact that some sub-modules,
-            # such as the one included in an attribute set, expects an "args"
-            # attribute to be given to the sub-module. As the option
-            # evaluation does not have any specific attribute name yet, we
-            # provide a default for the documentation and the freeform type.
-            #
-            # This is necessary as some option declaration might use the
-            # "name" attribute given as argument of the submodule and use it
-            # as the default of option declarations.
-            #
-            # We use lookalike unicode single angle quotation marks because
-            # of the docbook transformation the options receive. In all uses
-            # &gt; and &lt; wouldn't be encoded correctly so the encoded values
-            # would be used, and use of `<` and `>` would break the XML document.
-            # It shouldn't cause an issue since this is cosmetic for the manual.
-            _module.args.name = lib.mkOptionDefault "‹name›";
-          }] ++ modules;
+      base = evalModules {
+        inherit class specialArgs;
+        modules = [{
+          # This is a work-around for the fact that some sub-modules,
+          # such as the one included in an attribute set, expects an "args"
+          # attribute to be given to the sub-module. As the option
+          # evaluation does not have any specific attribute name yet, we
+          # provide a default for the documentation and the freeform type.
+          #
+          # This is necessary as some option declaration might use the
+          # "name" attribute given as argument of the submodule and use it
+          # as the default of option declarations.
+          #
+          # We use lookalike unicode single angle quotation marks because
+          # of the docbook transformation the options receive. In all uses
+          # &gt; and &lt; wouldn't be encoded correctly so the encoded values
+          # would be used, and use of `<` and `>` would break the XML document.
+          # It shouldn't cause an issue since this is cosmetic for the manual.
+          _module.args.name = lib.mkOptionDefault "‹name›";
+        }] ++ modules;
+      };
+
+      freeformType = base._module.freeformType;
+
+      name = "submodule'";
+
+    in lib.mkOptionType {
+      inherit name descriptionClass;
+      description =
+        if description != null then description
+        else freeformType.description or name;
+      check = x: builtins.isAttrs x && chk x;
+      merge = loc: defs:
+        finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
+          modules = [ { _module.args.name = lib.last loc; } ] ++ allModules defs;
+          prefix = loc;
+        }).config);
+      emptyValue = { value = {}; };
+      getSubOptions = prefix: (base.extendModules
+        { inherit prefix; }).options // lib.optionalAttrs (freeformType != null) {
+          # Expose the sub options of the freeform type. Note that the option
+          # discovery doesn't care about the attribute name used here, so this
+          # is just to avoid conflicts with potential options from the submodule
+          _freeformOptions = freeformType.getSubOptions prefix;
         };
-
-        freeformType = base._module.freeformType;
-
-        name = "submodule";
-
-      in lib.mkOptionType {
-        inherit name;
-        description =
-          if description != null then description
-          else freeformType.description or name;
-        check = x: builtins.isAttrs x && chk x;
-        merge = loc: defs:
-          finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
-            modules = [ { _module.args.name = lib.last loc; } ] ++ allModules defs;
-            prefix = loc;
-          }).config);
-        emptyValue = { value = {}; };
-        getSubOptions = prefix: (base.extendModules
-          { inherit prefix; }).options // lib.optionalAttrs (freeformType != null) {
-            # Expose the sub options of the freeform type. Note that the option
-            # discovery doesn't care about the attribute name used here, so this
-            # is just to avoid conflicts with potential options from the submodule
-            _freeformOptions = freeformType.getSubOptions prefix;
-          };
-        getSubModules = modules;
-        substSubModules = m: submoduleWith' (attrs // {
-          modules = m;
-        });
-        nestedTypes = lib.optionalAttrs (freeformType != null) {
-          freeformType = freeformType;
+      getSubModules = modules;
+      substSubModules = m: submoduleWith' (attrs // {
+        modules = m;
+      });
+      nestedTypes = lib.optionalAttrs (freeformType != null) {
+        freeformType = freeformType;
+      };
+      functor = lib.types.defaultFunctor name // {
+        type = submoduleWith';
+        payload = {
+          inherit modules class specialArgs shorthandOnlyDefinesConfig description;
         };
-        functor = lib.types.defaultFunctor name // {
-          type = types.submoduleWith;
-          payload = {
-            inherit modules class specialArgs shorthandOnlyDefinesConfig description;
-          };
-          binOp = lhs: rhs: {
-            class =
-              # `or null` was added for backwards compatibility only. `class` is
-              # always set in the current version of the module system.
-              if lhs.class or null == null then rhs.class or null
-              else if rhs.class or null == null then lhs.class or null
-              else if lhs.class or null == rhs.class then lhs.class or null
-              else throw "A submoduleWith option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
-            modules = lhs.modules ++ rhs.modules;
-            specialArgs =
-              let intersecting = builtins.intersectAttrs lhs.specialArgs rhs.specialArgs;
-              in if intersecting == {}
-              then lhs.specialArgs // rhs.specialArgs
-              else throw "A submoduleWith option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
-            shorthandOnlyDefinesConfig =
-              if lhs.shorthandOnlyDefinesConfig == null
-              then rhs.shorthandOnlyDefinesConfig
-              else if rhs.shorthandOnlyDefinesConfig == null
-              then lhs.shorthandOnlyDefinesConfig
-              else if lhs.shorthandOnlyDefinesConfig == rhs.shorthandOnlyDefinesConfig
-              then lhs.shorthandOnlyDefinesConfig
-              else throw "A submoduleWith option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
-            description =
-              if lhs.description == null
-              then rhs.description
-              else if rhs.description == null
-              then lhs.description
-              else if lhs.description == rhs.description
-              then lhs.description
-              else throw "A submoduleWith option is declared multiple times with conflicting descriptions";
-          };
+        binOp = lhs: rhs: {
+          class =
+            # `or null` was added for backwards compatibility only. `class` is
+            # always set in the current version of the module system.
+            if lhs.class or null == null then rhs.class or null
+            else if rhs.class or null == null then lhs.class or null
+            else if lhs.class or null == rhs.class then lhs.class or null
+            else throw "A submoduleWith' option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
+          modules = lhs.modules ++ rhs.modules;
+          specialArgs =
+            let intersecting = builtins.intersectAttrs lhs.specialArgs rhs.specialArgs;
+            in if intersecting == {}
+            then lhs.specialArgs // rhs.specialArgs
+            else throw "A submoduleWith' option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
+          shorthandOnlyDefinesConfig =
+            if lhs.shorthandOnlyDefinesConfig == null
+            then rhs.shorthandOnlyDefinesConfig
+            else if rhs.shorthandOnlyDefinesConfig == null
+            then lhs.shorthandOnlyDefinesConfig
+            else if lhs.shorthandOnlyDefinesConfig == rhs.shorthandOnlyDefinesConfig
+            then lhs.shorthandOnlyDefinesConfig
+            else throw "A submoduleWith' option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
+          description =
+            if lhs.description == null
+            then rhs.description
+            else if rhs.description == null
+            then lhs.description
+            else if lhs.description == rhs.description
+            then lhs.description
+            else throw "A submoduleWith' option is declared multiple times with conflicting descriptions";
         };
       };
+    };
 
   oneOf = { name, description, descriptionClass ? "noun", types }: lib.types.mkOptionType rec {
     inherit name description descriptionClass;
@@ -163,7 +182,7 @@ let
           (builtins.filter (type: builtins.all ({ value, ... }: let ret = type.check value; in ret) defs) types);
       in
         if res == null
-        then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.showDefs defs}"
+        then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
         else res;
   };
 
@@ -177,10 +196,13 @@ let
       name = "${name}";
       description = "${description}";
       descriptionClass = "noun";
-      merge = loc: defs: lib.mergeOneOption loc (map (def:
-        if builtins.isString def then def
-        else if builtins.isAttrs def && def?name then def.name
-        else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.showDefs defs}") defs);
+      check = x: builtins.isString x || (builtins.isAttrs x && x?name);
+      merge = loc: defs: lib.mergeOneOption loc (map (def@{ value, ... }: def // {
+        value =
+          if builtins.isString value then value
+          else if builtins.isAttrs value && value?name then value.name
+          else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}";
+      }) defs);
     };
     mkNullOption = attrs: lib.mkOption (attrs // {
       default = null;
@@ -189,8 +211,13 @@ let
     mkEnum = { name, description, enum }: lib.mkOptionType {
       inherit name description;
       descriptionClass = "noun";
-      check = x: builtins.elem x (builtins.attrNames enum) || builtins.elem x (builtins.attrValues enum);
-      merge = loc: defs: lib.mergeOneOption loc (map toString defs);
+      check =
+        if strictEnums then (x: builtins.elem x (builtins.attrValues enum))
+        else if laxEnums then (x: builtins.isString x || (builtins.isAttrs x && x?__toString))
+        else (x: builtins.elem x (builtins.attrNames enum) || builtins.elem x (builtins.attrValues enum));
+      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
+        value = toString def.value;
+      }) defs);
     };
     mkTableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false }:
     let
@@ -593,21 +620,22 @@ let
         per = {
           type = types.timeUnit;
           description = lib.mdDoc ''Time unit to apply the limit to, e.g. **"week"**, **"day"**, **"hour"**, etc. If omitted, defaults to **"second"**.'';
-          default = "second";
+          defaultText = lib.literalExpression "second";
         };
         burst = {
           type = lib.types.int;
           description = lib.mdDoc "The limit’s burst value. If omitted, defaults to **0**.";
+          defaultText = lib.literalExpression 0;
         };
         unit = {
           type = types.rateUnit;
           description = lib.mdDoc ''Unit of rate and burst values. If omitted, defaults to **"packets"**.'';
-          default = "packets";
+          defaultText = lib.literalExpression "packets";
         };
         inv = {
           type = lib.types.bool;
-          default = false;
           description = lib.mdDoc "If true, match if limit was exceeded. If omitted, defaults to **false**.";
+          defaultText = lib.literalExpression false;
         };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
@@ -712,7 +740,7 @@ let
     listOfSize2 = elemType:
       let list = lib.types.addCheck (lib.types.listOf elemType) (l: builtins.length l == 2);
       in list // {
-        description = "${lib.optionDescriptionPhrase (class: class == "noun") list} of size 2 (key-value pair)";
+        description = "${lib.types.optionDescriptionPhrase (class: class == "noun") list} of size 2 (key-value pair)";
         emptyValue = { }; # no .value attr, meaning unset
       };
     type = mkEnum {
@@ -728,7 +756,7 @@ let
     ipFamily = mkEnum {
       name = "nftablesIpFamily";
       description = "nftables ip family";
-      enum = builtins.filterAttrs (k: v: v.__info__.isIp or false) families;
+      enum = lib.filterAttrs (k: v: v.__info__.isIp or false) families;
     };
     chainType = mkEnum {
       name = "nftablesChainType";
@@ -793,7 +821,7 @@ let
       merge = loc: defs: lib.mergeOneOption loc (map (def:
         if builtins.isString def && lib.hasPrefix "@" def then def
         else if builtins.isAttrs def && def?name then "@${def.name}"
-        else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.showDefs defs}") defs);
+        else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}") defs);
     };
     mapName = mkName {
       name = "nftablesMapName";
@@ -912,6 +940,51 @@ let
       name = "nftablesOsfTtl";
       description = "nftables osf ttl";
       enum = osfTtl;
+    };
+    payloadProtocol = mkEnum {
+      name = "nftablesPayloadProtocol";
+      description = "nftables payload protocol";
+      enum = payloadProtocols;
+    };
+    payloadField = mkEnum {
+      name = "nftablesPayloadField";
+      description = "nftables payload field";
+      enum = payloadFields;
+    };
+    exthdr = mkEnum {
+      name = "nftablesExthdr";
+      description = "nftables ipv6 extension header";
+      enum = exthdrs;
+    };
+    exthdrField = mkEnum {
+      name = "nftablesExthdrField";
+      description = "nftables ipv6 extension header field";
+      enum = exthdrFields;
+    };
+    tcpOption = mkEnum {
+      name = "nftablesTcpOption";
+      description = "nftables tcp option";
+      enum = tcpOptions;
+    };
+    tcpOptionField = mkEnum {
+      name = "nftablesTcpOptionField";
+      description = "nftables tcp option field";
+      enum = tcpOptionFields;
+    };
+    sctpChunk = mkEnum {
+      name = "nftablesSctpChunk";
+      description = "nftables sctp chunk";
+      enum = sctpChunks;
+    };
+    sctpChunkField = mkEnum {
+      name = "nftablesSctpChunkField";
+      description = "nftables sctp chunk field";
+      enum = sctpChunkFields;
+    };
+    ctKey = mkEnum {
+      name = "nftablesCtKey";
+      description = "nftables ct expression key";
+      enum = ctKeys;
     };
     tableToDelete = mkTableType {
       finalMerge = x:
@@ -1335,7 +1408,7 @@ let
         type = oneOf {
           name = "nftablesMangleKey";
           description = "nftables mangle key expression";
-          types = [ types.exthdrExpression types.rawPayloadExpression types.fieldPayloadExpression types.metaExpression types.ctExpression types.ctHelperExpression ];
+          types = [ types.exthdrExpression types.payloadExpression types.metaExpression types.ctExpression types.ctHelperExpression ];
         };
         description = lib.mdDoc "The packet data to be changed, given as an **exthdr**, **payload**, **meta**, **ct** or **ct helper** expression.";
       };
@@ -1352,51 +1425,52 @@ let
       options.val_unit = lib.mkOption {
         type = types.byteUnit;
         description = lib.mdDoc ''Unit of **val**, e.g. **"kbytes"** or **"mbytes"**. If omitted, defaults to **"bytes"**.'';
-        default = "bytes";
+        defaultText = lib.literalExpression "bytes";
       };
       options.used = mkNullOption {
         type = types.int;
         description = "Quota used so far. Optional on input. If given, serves as initial value.";
       };
-      options.used_unit = lib.mkOption {
+      options.used_unit = mkNullOption {
         type = types.byteUnit;
         description = lib.mdDoc ''Unit of **used**. Defaults to **"bytes"**.'';
-        default = "bytes";
+        defaultText = lib.literalExpression "bytes";
       };
-      options.inv = lib.mkOption {
+      options.inv = mkNullOption {
         type = lib.types.bool;
-        default = false;
         description = lib.mdDoc "If **true**, will match if the quota has been exceeded. Defaults to **false**.";
+        defaultText = lib.literalExpression false;
       };
     });
-    limitStatement = lib.types.either lib.types.str (lib.types.submodule {
+    limitStatement = lib.types.either lib.types.str (submodule' {
+      finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then throw "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
       options.rate = lib.mkOption {
         type = lib.types.int;
         description = "Rate value to limit to.";
       };
-      options.rate_unit = lib.mkOption {
+      options.rate_unit = mkNullOption {
         type = types.rateUnit;
         description = lib.mdDoc ''Unit of **rate**, e.g. **"packets"** or **"mbytes"**. Defaults to **"packets"**.'';
-        default = "packets";
+        defaultText = lib.literalExpression "packets";
       };
       options.per = lib.mkOption {
         type = types.timeUnit;
         description = lib.mdDoc ''Denominator of rate, e.g. **"week"** or **"minutes"**.'';
       };
-      options.burst = lib.mkOption {
+      options.burst = mkNullOption {
         type = lib.types.int;
         description = lib.mdDoc "Burst value. Defaults to **0**.";
-        default = 0;
+        defaultText = lib.literalExpression 0;
       };
-      options.burst_unit = lib.mkOption {
+      options.burst_unit = mkNullOption {
         type = types.byteUnit;
         description = lib.mdDoc ''Unit of burst, ignored if rate_unit is **"packets"**. Defaults to **"bytes"**.'';
-        default = "packets";
+        defaultText = lib.literalExpression "bytes";
       };
-      options.inv = lib.mkOption {
+      options.inv = mkNullOption {
         type = lib.types.bool;
-        default = false;
         description = lib.mdDoc "If **true**, matches if the limit was exceeded. Defaults to **false**.";
+        defaultText = lib.literalExpression false;
       };
     });
     # TODO actually check
@@ -1477,15 +1551,15 @@ let
       };
     };
     setStatement = lib.types.submodule {
-      options.op = lib.types.mkOption {
+      options.op = lib.mkOption {
         description = lib.mdDoc ''Operator on set, either **"add"** or **"update"**.'';
         type = types.setOperator;
       };
-      options.elem = lib.types.mkOption {
+      options.elem = lib.mkOption {
         description = "Set element to add or update.";
         type = types.expression;
       };
-      options.set = lib.types.mkOption {
+      options.set = lib.mkOption {
         description = "Set reference.";
         type = types.setReference;
       };
@@ -1510,60 +1584,61 @@ let
       options.level = mkNullOption {
         description = lib.mdDoc ''Log level. Defaults to **"warn"**.'';
         type = types.logLevel;
+        defaultText = lib.literalExpression "warn";
       };
-      options.flags = lib.types.mkOption {
+      options.flags = lib.mkOption {
         description = "Log flags.";
         type = lib.types.listOf types.logFlag;
         default = [];
       };
     };
     meterStatement = lib.types.submodule {
-      options.name = lib.types.mkOption {
+      options.name = lib.mkOption {
         description = "Meter name.";
         type = lib.types.str;
       };
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Meter key.";
         type = types.expression;
       };
-      options.stmt = lib.types.mkOption {
+      options.stmt = lib.mkOption {
         description = "Meter statement.";
         type = types.statement;
       };
     };
     queueStatement = lib.types.submodule {
-      options.num = lib.types.mkOption {
+      options.num = lib.mkOption {
         description = "Queue number.";
         type = types.expression;
       };
-      options.flags = lib.types.mkOption {
+      options.flags = lib.mkOption {
         description = "Queue flags.";
         type = lib.types.listOf types.queueFlag;
       };
     };
     vmapStatement = lib.types.submodule {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Map key.";
         type = types.expression;
       };
-      options.flags = lib.types.mkOption {
+      options.flags = lib.mkOption {
         description = "Mapping expression consisting of value/verdict pairs.";
         type = types.expression;
       };
     };
-    ctCountStatement = lib.types.submodule {
-      options.val = lib.types.mkOption {
+    ctCountStatement = submodule' {
+      options.val = lib.mkOption {
         description = "Connection count threshold.";
         type = lib.types.int;
       };
-      options.inv = lib.mkOption {
+      options.inv = mkNullOption {
         type = lib.types.bool;
-        default = false;
         description = lib.mdDoc "If **true**, match if **val** was exceeded. If omitted, defaults to **false**.";
+        defaultText = lib.literalExpression false;
       };
     };
     xtStatement = lib.types.submodule {
-      options.type = lib.types.mkOption {
+      options.type = lib.mkOption {
         type = types.xtType;
       };
       options.name = lib.mkOption {
@@ -1726,106 +1801,134 @@ let
       };
     });
     mapExpression = lib.types.submodule {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Map key.";
         type = types.expression;
       };
-      options.data = lib.types.mkOption {
+      options.data = lib.mkOption {
         description = "Mapping expression consisting of value/target pairs.";
         type = types.expression;
       };
     };
     prefixExpression = lib.types.submodule {
-      options.addr = lib.types.mkOption {
+      options.addr = lib.mkOption {
         description = "Address part of an address prefix.";
         type = types.expression;
       };
-      options.len = lib.types.mkOption {
+      options.len = lib.mkOption {
         description = "Prefix length.";
         type = lib.types.int;
       };
     };
     rawPayloadExpression = lib.types.submodule {
-      options.base = lib.types.mkOption {
+      options.base = lib.mkOption {
         description = "Payload base.";
         type = types.payloadBase;
       };
-      options.offset = lib.types.mkOption {
+      options.offset = lib.mkOption {
         description = "Payload offset.";
         type = lib.types.int;
       };
-      options.len = lib.types.mkOption {
+      options.len = lib.mkOption {
         description = "Payload length.";
         type = lib.types.int;
       };
     };
-    fieldPayloadExpression = lib.types.submodule {
-      options.protocol = lib.types.mkOption {
+    fieldPayloadExpression = submodule' {
+      finalMerge = { protocol, field }@ret: let
+        inherit (payloadProtocols.${protocol}.__info__) fields;
+      in if laxEnums || builtins.elem field fields then ret else throw "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " fields}";
+      options.protocol = lib.mkOption {
         description = "Payload reference packet header protocol.";
-        type = lib.types.str;
+        type = types.payloadProtocol;
       };
-      options.field = lib.types.mkOption {
+      options.field = lib.mkOption {
         description = "Payload reference packet header field.";
-        type = lib.types.str;
+        type = types.payloadField;
       };
     };
+    payloadExpression = oneOf {
+      name = "nftablesPayloadExpression";
+      description = "nftables payload expression";
+      types = [ types.rawPayloadExpression types.fieldPayloadExpression ];
+    };
     exthdrExpression = submodule' {
-      options.name = lib.types.mkOption {
+      finalMerge = { name, ... }@ret: let
+        inherit (exthdrs.${name}.__info__) fields;
+      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      options.name = lib.mkOption {
         description = "IPv6 extension header name.";
-        type = lib.types.str;
+        type = types.exthdr;
       };
       options.field = mkNullOption {
         description = lib.mdDoc "Field name. If this property is not given, the expression is to be used as a header existence check in a **match** statement with a boolean on the right hand side.";
-        type = lib.types.str;
+        type = types.exthdrField;
       };
       options.offset = mkNullOption {
         description = lib.mdDoc "Field **offset** (used only for **rt0** protocol).";
-        type = lib.types.str;
+        type = lib.types.int;
       };
     };
     tcpOptionExpression = submodule' {
-      options.name = lib.types.mkOption {
+      finalMerge = { name, ... }@ret: let
+        inherit (tcpOptions.${name}.__info__) fields;
+      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      options.name = lib.mkOption {
         description = "TCP option header name.";
-        type = lib.types.str;
+        type = types.tcpOption;
       };
       options.field = mkNullOption {
         description = lib.mdDoc "TCP option header field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
-        type = lib.types.str;
+        type = types.tcpOptionField;
       };
     };
     sctpChunkExpression = submodule' {
-      options.name = lib.types.mkOption {
+      finalMerge = { name, ... }@ret: let
+        inherit (sctpChunks.${name}.__info__) fields;
+      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "SCTP chunk ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      options.name = lib.mkOption {
         description = "SCTP chunk name.";
-        type = lib.types.str;
+        type = types.sctpChunk;
       };
       options.field = mkNullOption {
         description = lib.mdDoc "SCTP chunk field. If this property is not given, the expression is to be used as an SCTP chunk existence check in a **match** statement with a boolean on the right hand side.";
-        type = lib.types.str;
+        type = types.sctpChunkField;
       };
     };
     metaExpression = lib.types.submodule {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Meta key.";
         type = types.metaKey;
       };
     };
     rtExpression = submodule' {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Routing data key.";
         type = types.rtKey;
       };
       options.family = mkNullOption {
         description = "Routing data IP family. This property is optional and defaults to unspecified.";
         type = types.ipFamily;
+        defaultText = lib.literalExpression null;
       };
     };
     ctExpression = submodule' {
-      options.key = lib.types.mkOption {
+      finalMerge = { key, ... }@ret: let
+        info = (ctKeys.${key} or {}).__info__ or {};
+        dir = info.dir or null;
+        family = info.family or null;
+      in
+        if dir == true && !ret?dir then throw "You must provide a direction for CT key ${key}."
+        else if dir == false && ret?dir then throw "You must not provide a direction for CT key ${key}."
+        else if family == true && !ret?family then throw "You must provide an IP family for CT key ${key}."
+        else if family == false && ret?family then throw "You must not provide an IP family for CT key ${key}."
+        else ret;
+      options.key = lib.mkOption {
         description = "CT key";
-        type = types.string;
+        type = types.ctKey;
       };
-      options.family = lib.types.mkOption {
-        description = "CT IP family.";
+      options.family = mkNullOption {
+        description = "IP family.";
         type = types.ipFamily;
       };
       options.dir = mkNullOption {
@@ -1833,61 +1936,60 @@ let
         type = types.ctDir;
       };
     };
-    numgenExpression = lib.types.submodule {
-      options.mode = lib.types.mkOption {
+    numgenExpression = submodule' {
+      options.mode = lib.mkOption {
         description = "Numgen mode";
         type = types.ngMode;
       };
-      options.mod = lib.types.mkOption {
-        description = "Number modulus (max value + 1).";
+      options.mod = lib.mkOption {
+        description = "Number modulus (number of different values possible).";
         type = lib.types.int;
       };
-      options.offset = lib.types.mkOption {
-        description = "Number offset (min value). Defaults to 0.";
+      options.offset = mkNullOption {
+        description = "Number offset (added to the result). Defaults to 0.";
         type = lib.types.int;
-        default = 0;
+        defaultText = lib.literalExpression 0;
       };
     };
-    jhashExpression = lib.types.submodule {
-      options.mod = lib.types.mkOption {
-        description = "Hash modulus (max value + 1).";
+    jhashExpression = submodule' {
+      options.mod = lib.mkOption {
+        description = "Hash modulus (number of possible different values).";
         type = lib.types.int;
       };
-      options.offset = lib.types.mkOption {
+      options.offset = mkNullOption {
         description = "Hash offset (min value). Defaults to 0.";
         type = lib.types.int;
-        default = 0;
+        defaultText = lib.literalExpression 0;
       };
-      options.expr = lib.types.mkOption {
+      options.expr = lib.mkOption {
         description = "Expression to hash.";
         type = types.expression;
       };
-      options.seed = lib.types.mkOption {
+      options.seed = mkNullOption {
         description = "Hash seed. Defaults to 0.";
         type = lib.types.int;
-        default = 0;
+        defaultText = lib.literalExpression 0;
       };
     };
-    symhashExpression = lib.types.submodule {
-      options.mod = lib.types.mkOption {
-        description = "Hash modulus (max value + 1).";
+    symhashExpression = submodule' {
+      options.mod = lib.mkOption {
+        description = "Hash modulus (number of possible different values).";
         type = lib.types.int;
       };
-      options.offset = lib.types.mkOption {
+      options.offset = mkNullOption {
         description = "Hash offset (min value). Defaults to 0.";
         type = lib.types.int;
-        default = 0;
+        defaultText = lib.literalExpression 0;
       };
     };
-    fibExpression = lib.types.submodule {
-      options.result = lib.types.mkOption {
+    fibExpression = submodule' {
+      options.result = lib.mkOption {
         description = "Fib expression type.";
         type = types.fibResult;
       };
-      options.flags = lib.types.mkOption {
+      options.flags = mkNullOption {
         description = "Fib expression type.";
         type = lib.types.listOf types.fibFlag;
-        default = [];
       };
     };
     binOpExpression = lib.types.either (types.listOfSize2 types.expression) (submodule' {
@@ -1902,9 +2004,9 @@ let
       };
     });
     elemExpression = submodule' {
-      options.val = lib.types.mkOption {
+      options.val = lib.mkOption {
         description = "Set element.";
-        type = lib.types.expression;
+        type = types.expression;
       };
       options.timeout = mkNullOption {
         description = lib.mdDoc "Timeout value for sets/maps with flag **timeout**.";
@@ -1920,17 +2022,17 @@ let
       };
     };
     socketExpression = lib.types.submodule {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Socket attribute.";
         type = types.socketKey;
       };
     };
     osfExpression = submodule' {
-      options.key = lib.types.mkOption {
+      options.key = lib.mkOption {
         description = "Which part of the fingerprint info to match against. At this point, only the OS name is supported.";
         type = types.osfKey;
       };
-      options.ttl = lib.types.mkOption {
+      options.ttl = mkNullOption {
         description = lib.mdDoc "Define how the packet’s TTL value is to be matched. This property is optional. If omitted, the TTL value has to match exactly. A value of **loose** accepts TTL values less than the fingerprint one. A value of **skip** omits TTL value comparison entirely.";
         type = types.osfTtl;
       };
@@ -1963,7 +2065,7 @@ let
           description = "Construct a range of values. The first array item denotes the lower boundary, the second one the upper boundary.";
         };
         payload = {
-          type = lib.types.either types.rawPayloadExpression types.fieldPayloadExpression;
+          type = types.payloadExpression;
           description = lib.mdDoc ''
             Construct a payload expression, i.e. a reference to a certain part of packet data. The first form creates a raw payload expression to point at a number (**len**) of bytes at a certain offset (**offset**) from a given reference point (**base**). The following base values are accepted:
 
@@ -2010,7 +2112,6 @@ let
             The **family** property is optional and defaults to unspecified.
           '';
         };
-        # TODO: from here
         ct = {
           type = types.ctExpression;
           description = lib.mdDoc ''
@@ -2132,8 +2233,11 @@ let
     random = {};
   };
   fibResults = mkEnum {
+    # get output interface id
     oif = {};
+    # get output interface name
     oifname = {};
+    # get output address type
     type = {};
   };
   fibFlags = mkEnum {
@@ -2312,6 +2416,125 @@ let
     add = {};
     update = {};
   };
+  payloadProtocols = mkEnum {
+    ether.fields = [ "daddr" "saddr" "type" ];
+    vlan.fields = [ "id" "dei" "pcp" "type" ];
+    arp.fields = [ "htype" "ptype" "hlen" "plen" "operation" "saddr ip" "saddr ether" "daddr ip" "daddr ether" ];
+    ip.fields = [ "version" "hdrlength" "dscp" "ecn" "length" "id" "frag-off" "ttl" "protocol" "checksum" "saddr" "daddr" ];
+    icmp.fields = [ "type" "code" "checksum" "id" "sequence" "gateway" "mtu" ];
+    igmp.fields = [ "type" "mrt" "checksum" "group" ];
+    ip6.fields = [ "version" "dscp" "ecn" "flowlabel" "length" "nexthdr" "hoplimit" "saddr" "daddr" ];
+    icmpv6.fields = [ "type" "code" "checksum" "parameter-problem" "packet-too-big" "id" "sequence" "max-delay" ];
+    tcp.fields = [ "sport" "dport" "sequence" "ackseq" "doff" "reserved" "flags" "window" "checksum" "urgptr" ];
+    udp.fields = [ "sport" "dport" "length" "checksum" ];
+    udplite.fields = [ "sport" "dport" "checksum" ];
+    sctp.fields = [ "sport" "dport" "vtag" "checksum" ];
+    dccp.fields = [ "sport" "dport" "type" ];
+    ah.fields = [ "nexthdr" "hdrlength" "reserved" "spi" "sequence" ];
+    esp.fields = [ "spi" "sequence" ];
+    comp.fields = [ "nexthdr" "flags" "cpi" ];
+    # not sure if "gre ip ..." and "gre ip6 ..." are supported in json scheme
+    gre.fields = [ "flags" "version" "protocol" ];
+    # same here
+    geneve.fields = [ "vni" "flags" ];
+    gretap.fields = [ "vni" "flags" ];
+    vxlan.fields = [ "vni" "flags" ];
+  };
+  payloadFields = mkEnum (builtins.foldl'
+    (res: field: res // { ${field} = {}; })
+    {}
+    (builtins.concatLists
+      (map
+        (x: x.__info__.fields)
+        (builtins.attrValues payloadProtocols))));
+  exthdrs = mkEnum {
+    hbh.fields = [ "nexthdr" "hdrlength" ];
+    rt.fields = [ "nexthdr" "hdrlength" "type" "seg-left" ];
+    frag.fields = [ "nexthdr" "frag-off" "more-fragments" "id" ];
+    dst.fields = [ "nexthdr" "hdrlength" ];
+    mh.fields = [ "nexthdr" "hdrlength" "checksum" "type" ];
+    srh.fields = [ "flags" "tag" "sid" "seg-left" ];
+  };
+  exthdrFields = mkEnum (builtins.foldl'
+    (res: field: res // { ${field} = {}; })
+    {}
+    (builtins.concatLists
+      (map
+        (x: x.__info__.fields)
+        (builtins.attrValues exthdrs))));
+  tcpOptions = mkEnum {
+    eol.fields = [ ];
+    nop.fields = [ ];
+    maxseg.fields = [ "length" "size" ];
+    window.fields = [ "length" "count" ];
+    sack-perm.fields = [ "length" ];
+    sack.fields = [ "length" "left" "right" ];
+    sack0.fields = [ "length" "left" "right" ];
+    sack1.fields = [ "length" "left" "right" ];
+    sack2.fields = [ "length" "left" "right" ];
+    sack3.fields = [ "length" "left" "right" ];
+    timestamp.fields = [ "length" "tsval" "tsecr" ];
+  };
+  tcpOptionFields = mkEnum (builtins.foldl'
+    (res: field: res // { ${field} = {}; })
+    {}
+    (builtins.concatLists
+      (map
+        (x: x.__info__.fields)
+        (builtins.attrValues tcpOptions))));
+  sctpChunks = mkEnum {
+    data.fields = [ "type" "flags" "length" "tsn" "stream" "ssn" "ppid" ];
+    init.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
+    init-ack.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
+    sack.fields = [ "type" "flags" "length" "a-rwnd" "cum-tsn-ack" "num-gap-ack-blocks" "num-dup-tsns" ];
+    heartbeat.fields = [ "type" "flags" "length" ];
+    heartbeat-ack.fields = [ "type" "flags" "length" ];
+    abort.fields = [ "type" "flags" "length" ];
+    shutdown.fields = [ "type" "flags" "length" "cum-tsn-ack" ];
+    shutdown-ack.fields = [ "type" "flags" "length" ];
+    error.fields = [ "type" "flags" "length" ];
+    cookie-echo.fields = [ "type" "flags" "length" ];
+    cookie-ack.fields = [ "type" "flags" "length" ];
+    ecne.fields = [ "type" "flags" "length" "lowest-tsn" ];
+    cwr.fields = [ "type" "flags" "length" "lowest-tsn" ];
+    shutdown-complete.fields = [ "type" "flags" "length" ];
+    asconf-ack.fields = [ "type" "flags" "length" "seqno" ];
+    forward-tsn.fields = [ "type" "flags" "length" "new-cum-tsn" ];
+    asconf.fields = [ "type" "flags" "length" "seqno" ];
+  };
+  sctpChunkFields = mkEnum (builtins.foldl'
+    (res: field: res // { ${field} = {}; })
+    {}
+    (builtins.concatLists
+      (map
+        (x: x.__info__.fields)
+        (builtins.attrValues sctpChunks))));
+  ctKeys = let
+    ff = { dir = false; family = false; }; # false/false
+    nf = ff // { dir = null; }; # null/false
+    tf = ff // { dir = true; }; # etc
+    tt = tf // { family = true; };
+  in mkEnum {
+    state = ff;
+    direction = ff;
+    status = ff;
+    mark = ff;
+    expiration = ff;
+    helper = ff;
+    label = ff;
+    count = ff;
+    id = ff;
+    l3proto = nf;
+    protocol = nf;
+    bytes = nf;
+    packets = nf;
+    avgpkt = nf;
+    zone = nf;
+    proto-src = tf;
+    proto-dst = tf;
+    saddr = tt;
+    daddr = tt;
+  };
   connectionStates = mkEnum {
     close = "tcp";
     close_wait = "tcp";
@@ -2326,7 +2549,7 @@ let
     replied = "udp";
     unreplied = "udp";
   };
-  operators = mkEnum {
+  operators = let self = mkEnum {
     and = "&";
     or = "|";
     xor = "^";
@@ -2340,11 +2563,21 @@ let
     ge = ">=";
     # bitmask
     "in" = "in";
-    IN = "in";
-    contains = "in";
+  }; in self // {
+    # in is reserved, so also create some aliases
+    IN = self."in";
+    in' = self."in";
+    contains = self."in";
   };
 in {
   config.notnft = {
-    inherit families chainTypes types wildcard setReference;
+    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl;
+  };
+  options.notnftConfig.enumMode = lib.mkOption {
+    default = "normal";
+    type = lib.types.str;
+    description = lib.mdDoc ''
+      Enum mode. "strict" to disallow using strings, "normal" for default behavior, "lax" to disable enum checks.
+    '';
   };
 }
