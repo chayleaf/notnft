@@ -267,11 +267,11 @@ let
           description = "The chain’s type.";
         };
         hook = {
-          type = types.hookName;
+          type = types.hook;
           description = "The chain’s hook.";
         };
         prio = {
-          type = lib.types.int;
+          type = types.prio;
           description = "The chain’s priority.";
         };
         dev = {
@@ -317,10 +317,11 @@ let
       }
       // (if withExpr then builtins.mapAttrs mkOpt {
         expr = {
-          type = lib.types.listOf types.statement;
+          type = lib.types.nonEmptyListOf types.statement;
           description = lib.mdDoc "An array of statements this rule consists of. In input, it is used in **add**/**insert**/**replace** commands only.";
         };
-      } else {}) (if withHandle then builtins.mapAttrs mkOpt {
+      } else {})
+      // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The rule’s handle. In **delete**/**replace** commands, it serves as an identifier of the rule to delete/replace. In **add**/**insert** commands, it serves as an identifier of an existing rule to append/prepend the rule to.";
@@ -361,13 +362,13 @@ let
         };
       } // (if withExtraFields then builtins.mapAttrs mkOpt {
         type = {
-          type = lib.types.either (lib.types.nonEmptyListOf types.type) types.type;
+          type = lib.types.either (lib.types.nonEmptyListOf types.keyType) types.keyType;
           description = ''The ${name}’s datatype - might be a string, such as "ipv4_addr" or an array consisting of strings (for concatenated types).'';
         };
       } else {})
       // (if withExtraFields && isMap != false then builtins.mapAttrs mkOpt {
         map = {
-          type = types.types.either (lib.types.nonEmptyListOf types.type) types.type;
+          type = lib.types.either (lib.types.nonEmptyListOf types.valType) types.valType;
           description =
             if isMap == true then
               "Type of values this map maps to."
@@ -429,10 +430,12 @@ let
           description = "The ${name}’s name.";
         };
       } // (if withElem then builtins.mapAttrs mkOpt {
-        type =
-          if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
-          else types.expression;
-        description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
+        elem = {
+          type =
+            if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
+            else types.expression;
+          description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
+        };
       } else {});
     };
     mkFlowtableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
@@ -457,7 +460,7 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         hook = {
-          type = types.hookName;
+          type = types.hook;
           description = "The flowtable’s hook.";
         };
         prio = {
@@ -743,10 +746,15 @@ let
         description = "${lib.types.optionDescriptionPhrase (class: class == "noun") list} of size 2 (key-value pair)";
         emptyValue = { }; # no .value attr, meaning unset
       };
-    type = mkEnum {
-      name = "nftablesType";
-      description = "nftables type";
-      enum = nftablesTypes;
+    keyType = mkEnum {
+      name = "nftablesKeyType";
+      description = "nftables key type";
+      enum = lib.filterAttrs (k: v: v.__info__.isKey or false) nftTypes;
+    };
+    valType = mkEnum {
+      name = "nftablesValType";
+      description = "nftables val type";
+      enum = nftTypes;
     };
     family = mkEnum {
       name = "nftablesFamily";
@@ -835,6 +843,19 @@ let
       name = "nftablesHook";
       description = "nftables hook";
       enum = hooks;
+    };
+    prio = lib.mkOptionType {
+      name = "nftablesPrio";
+      description = "nftables chain priority";
+      descriptionClass = "noun";
+      check =
+        x:
+        builtins.isInt x
+        || (if strictEnums then builtins.elem x (builtins.attrValues priorities)
+            else builtins.elem x (builtins.attrNames priorities) || builtins.elem x (builtins.attrValues priorities));
+      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
+        value = if builtins.isInt def.value then def.value else toString def.value;
+      }) defs);
     };
     ctHelperL4Proto = mkEnum {
       name = "nftablesCtHelperL4Proto";
@@ -999,17 +1020,40 @@ let
     chainToAdd = mkChainType {
       finalMerge = x:
         let
+          baseDetect = [ "type" "hook" "prio" "policy" "dev" ];
           reqBase = [ "family" "type" "hook" "prio" "policy" ];
-          reqBase' = reqBase ++ (lib.optionals (x.family or "" == "netdev") [ "dev" ]);
+          familyInfo = (families.${x.family or ""} or {}).__info__ or {};
+          reqBase' = reqBase ++ (lib.optionals (familyInfo.requireBaseChainDevice or false) [ "dev" ]);
+          info = (chainTypes.${x.type or ""} or {}).__info__ or {};
         in
           if
-            builtins.any (x: builtins.elem x reqBase') (builtins.attrNames x)
-            && builtins.any (k: !x?x) reqBase'
+            builtins.any (k: builtins.elem k baseDetect) (builtins.attrNames x)
+            && builtins.any (k: !x?${k}) reqBase'
           then
             throw "Base chains ${
               if x.family or "" == "netdev" then "in the netdev family " else ""
             }must have fields ${builtins.concatStringsSep ", " (map (s: "`${s}`") reqBase')} set"
-          else x;
+          else if x.family or "" != "netdev" && x?dev then
+            throw "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
+          else if x?family && info.families or null != null && !(builtins.elem x.family info.families) then
+            throw "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
+          else if x?hook && info.hooks or null != null && !(builtins.elem x.hook info.hooks) then
+            throw "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
+          else if x?hook && familyInfo.hooks or null != null && !(builtins.elem x.hook familyInfo.hooks) then
+            throw "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
+          else
+            x // (if builtins.isString (x.prio or null) then
+              let
+                prioInfo = priorities.${x.prio}.__info__;
+              in
+                (if x?family && prioInfo.families or null != null && !(builtins.elem x.family prioInfo.families) then
+                  throw "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
+                else if x?hook && prioInfo.hooks or null != null && !(builtins.elem x.hook prioInfo.hooks) then
+                  throw "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
+                else {
+                  prio = prioInfo.value (x.family or "");
+                })
+            else {});
       reqFields = [ "table" "name" ];
       withExtraFields = true;
     };
@@ -1223,7 +1267,7 @@ let
       name = "nftablesAddCommand";
       description = "add command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "Add ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -1253,7 +1297,7 @@ let
       name = "nftablesCreateCommand";
       description = "nftables create command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "Create ${k} (same as add, but ensure it doesn't already exist).";
       })) {
         table = types.tableToWhatever;
@@ -1283,7 +1327,7 @@ let
       name = "nftablesDeleteCommand";
       description = "nftables delete command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "Delete ${k}.";
       })) {
         table = types.tableToDelete;
@@ -1312,7 +1356,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "List ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -1345,7 +1389,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "Reset ${k}.";
       })) {
         counter = types.counterToWhatever;
@@ -1360,7 +1404,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        inherit (v) type;
+        type = v;
         description = "Flush ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -1377,6 +1421,59 @@ let
           type = types.chainToRename;
           description = "chain to rename";
         };
+      };
+    };
+    command = oneOf {
+      name = "nftablesCommand";
+      description = "nftables command";
+      types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
+        inherit (v) type;
+        description = "${k} command.\n\n${v.description}";
+      })) {
+        add = {
+          type = types.addCommand;
+          description = "Add a new ruleset element to the kernel.";
+        };
+        replace = {
+          type = types.replaceCommand;
+          description = lib.mdDoc "Replace a rule. In rule, the **handle** property is mandatory and identifies the rule to be replaced.";
+        };
+        create = {
+          type = types.createCommand;
+          description = lib.mdDoc "Identical to **add** command, but returns an error if the object already exists.";
+        };
+        insert = {
+          type = types.insertCommand ;
+          description = lib.mdDoc "This command is identical to **add** for rules, but instead of appending the rule to the chain by default, it inserts at first position. If a **handle** or **index** property is given, the rule is inserted before the rule identified by those properties.";
+        };
+        delete = {
+          type = types.deleteCommand;
+          description = lib.mdDoc "Delete an object from the ruleset. Only the minimal number of properties required to uniquely identify an object is generally needed in *ADD_OBJECT*. For most ruleset elements, this is **family** and **table** plus either **handle** or **name** (except rules since they don’t have a name).";
+        };
+        list = {
+          type = types.listCommand;
+          description = lib.mdDoc "List ruleset elements. The plural forms are used to list all objects of that kind, optionally filtered by **family** and for some, also **table**.";
+        };
+        reset = {
+          type = types.resetCommand;
+          description = "Reset state in suitable objects, i.e. zero their internal counter.";
+        };
+        flush = {
+          type = types.flushCommand;
+          description = lib.mdDoc "Empty contents in given object, e.g. remove all chains from given **table** or remove all elements from given **set**.";
+        };
+        rename = {
+          type = types.renameCommand;
+          description = lib.mdDoc "Rename a chain. The new name is expected in a dedicated property named **newname**.";
+        };
+      };
+    };
+    # not really ruleset, just commands
+    ruleset = lib.types.submodule {
+      options.nftables = lib.mkOption {
+        type = lib.types.listOf types.command;
+        description = "Commands to execute.";
+        default = [ ];
       };
     };
     # next: Statements
@@ -2201,13 +2298,15 @@ let
   };
   wildcard = "\\*";
   setReference = s: "@${s}";
-  nftablesTypes = mkEnum {
-    ipv4_addr = {};
-    ipv6_addr = {};
-    ether_addr = {};
-    inet_proto = {};
-    inet_service = {};
-    mark = {};
+  nftTypes = mkEnum {
+    ipv4_addr.isKey = true;
+    ipv6_addr.isKey = true;
+    ether_addr.isKey = true;
+    inet_proto.isKey = true;
+    inet_service.isKey = true;
+    mark.isKey = true;
+    counter = {};
+    quota = {};
   };
   xtTypes = mkEnum {
     match = {};
@@ -2288,31 +2387,31 @@ let
   };
   families = mkEnum {
     ip = {
-      hooks = with hooks; [ prerouting input forward output postrouting ];
+      hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
       isIp = true;
     };
     ip6 = {
-      hooks = with hooks; [ prerouting input forward output postrouting ];
+      hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
       isIp = true;
     };
     inet = {
-      hooks = with hooks; [ prerouting input forward output postrouting ingress ];
+      hooks = [ "prerouting" "input" "forward" "output" "postrouting" "ingress" ];
     };
     arp = {
-      hooks = with hooks; [ input output ];
+      hooks = [ "input" "output" ];
     };
     bridge = {
       # not sure if ingress is supported here, docs dont specify it, whatever
-      hooks = with hooks; [ prerouting input forward output postrouting ingress ];
+      hooks = [ "prerouting" "input" "forward" "output" "postrouting" "ingress" ];
     };
     netdev = {
-      hooks = with hooks; [ ingress egress ];
+      hooks = [ "ingress" "egress" ];
       requireBaseChainDevice = true;
     };
   };
   chainPolicies = mkEnum {
-    accept = true;
-    reject = false;
+    accept = {};
+    reject = {};
   };
   setPolicies = mkEnum {
     performance = {};
@@ -2353,21 +2452,20 @@ let
   };
   chainTypes = mkEnum {
     # Standard chain type to use when in doubt.
-    filter = {
-    };
+    filter = { };
     # Chains of this type perform Native Address Translation based on conntrack entries.
     # Only the first packet of a connection actually traverses this chain - its rules
     # usually define details of the created conntrack entry (NAT statements for instance). 
     nat = {
-      families = with families; [ ip ip6 inet ];
-      hooks = with hooks; [ prerouting input output postrouting ];
+      families = [ "ip" "ip6" "inet" ];
+      hooks = [ "prerouting" "input" "output" "postrouting" ];
     };
     # If a packet has traversed a chain of this type and is about to be accepted, a new
     # route lookup is performed if relevant parts of the IP header have changed. This
     # allows one to e.g. implement policy routing selectors in nftables.
     route = {
-      families = with families; [ ip ip6 ];
-      hooks = with hooks; [ output ];
+      families = [ "ip" "ip6" ];
+      hooks = [ "output" ];
     };
   };
   hooks = mkEnum {
@@ -2569,9 +2667,41 @@ let
     in' = self."in";
     contains = self."in";
   };
+  priorities = mkEnum {
+    raw = {
+      value = family: -300;
+      families = [ "ip" "ip6" "inet" ];
+    };
+    mangle = {
+      value = family: -150;
+      families = [ "ip" "ip6" "inet" ];
+    };
+    dstnat = {
+      value = family: if family == "bridge" then -300 else -100;
+      families = [ "ip" "ip6" "inet" "bridge" ];
+      hooks = [ "prerouting" ];
+    };
+    filter = {
+      value = family: if family == "bridge" then -200 else 0;
+      families = [ "ip" "ip6" "inet" "arp" "netdev" "bridge" ];
+    };
+    security = {
+      value = family: 50;
+      families = [ "ip" "ip6" "inet" ];
+    };
+    srcnat = {
+      value = family: if family == "bridge" then 300 else 100;
+      families = [ "ip" "ip6" "inet" "bridge" ];
+      hooks = [ "postrouting" ];
+    };
+    out = {
+      value = family: 100;
+      families = [ "bridge" ];
+    };
+  };
 in {
   config.notnft = {
-    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl;
+    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags;
   };
   options.notnftConfig.enumMode = lib.mkOption {
     default = "normal";

@@ -32,6 +32,29 @@ let
   chkExprEq = chkTypeEq types.expression;
   # check that evaluation of `x` fails
   fails = x: !(builtins.tryEval x).success;
+
+  chkCommand = x: chkTypeEq' true types.command x x;
+  removeAll = attrs: builtins.mapAttrs (k: v: builtins.removeAttrs v attrs);
+  addAll = attrs: builtins.mapAttrs (k: v: v // attrs);
+  preserveAll = attrs: builtins.mapAttrs (k: lib.filterAttrs (k: v: builtins.elem k attrs));
+  chkAdd = x:
+    assert chkCommand { add = x; };
+    chkCommand { create = x; };
+  chkAddNoDelete = x:
+    assert chkAdd x;
+    assert fails (chkDelete x);
+    fails (chkDelete (addAll { handle = 5; } x));
+  chkDelete = x: chkCommand { delete = x; };
+  fieldsRequired = fields: func: x: assert func x; builtins.all (field: fails (func (removeAll [ field ] x))) fields;
+  fieldsOptional = fields: func: x: assert func x; builtins.all (field: func (removeAll [ field ] x)) fields;
+  chkAddDelete = x:
+    assert chkAdd x;
+    assert chkDelete x;
+    assert chkDelete (addAll { handle = 5; } (removeAll [ "name" ] x));
+    assert chkDelete (addAll { handle = 5; } (preserveAll [ "table" ] x));
+    assert fails (chkDelete (removeAll [ "name" ] x));
+    fails (chkDelete (removeAll [ "name" ] x));
+
 in
 
 ### EXPRESSIONS
@@ -171,6 +194,118 @@ assert fails (chkExprJson { osf = { key = flake.osfKeys.name; ttl = "abcd"; }; }
 # ct expectation statement
 # xt statement
 ### COMMANDS
+## ADD/CREATE
+# ADD TABLE 
+assert chkAddDelete { table = { family = flake.families.bridge; name = "a"; }; };
+# ADD CHAIN 
+# base chain: with type, hook and priority
+assert fieldsRequired [ "type" "hook" "prio" "policy" "dev" ] chkAddNoDelete { chain = {
+  family = flake.families.netdev;
+  table = "myTable";
+  name = "myChain";
+  type = flake.chainTypes.filter;
+  hook = flake.hooks.ingress;
+  prio = 0;
+  dev = "eth0";
+  policy = flake.chainPolicies.accept;
+}; };
+assert chkAddDelete { chain = {
+  family = flake.families.inet;
+  table = "myTable";
+  name = "myChain";
+}; };
+assert chkTypeEq' true types.command {
+  add.chain = {
+    family = flake.families.inet;
+    table = "myTable";
+    name = "myChain";
+    type = flake.chainTypes.filter;
+    hook = flake.hooks.postrouting;
+    prio = 100;
+    policy = flake.chainPolicies.accept;
+  };
+} {
+  add.chain = {
+    family = flake.families.inet;
+    table = "myTable";
+    name = "myChain";
+    type = flake.chainTypes.filter;
+    hook = flake.hooks.postrouting;
+    prio = flake.priorities.srcnat;
+    policy = flake.chainPolicies.accept;
+  };
+};
+# bridge-only prio
+assert fails (chkAdd {
+  chain = {
+    family = flake.families.inet;
+    table = "myTable";
+    name = "myChain";
+    type = flake.chainTypes.filter;
+    hook = flake.hooks.ingress;
+    prio = flake.priorities.out;
+    policy = flake.chainPolicies.accept;
+  };
+});
+# ADD RULE 
+assert chkAdd { rule = {
+  family = flake.families.inet;
+  table = "myTable";
+  chain = "myChain";
+  expr = [ { accept = null; } ];
+  comment = "a";
+}; };
+# ADD SET/MAP
+assert chkAdd { set = {
+  family = flake.families.inet;
+  table = "myTable";
+  name = "mySet";
+  type = flake.nftTypes.ipv4_addr;
+  policy = flake.setPolicies.performance;
+  flags = with flake.setFlags; [ constant interval timeout ];
+  elem = [ 1 2 3 4 5 6 ];
+  timeout = 10;
+  gc-interval = 10;
+  size = 10;
+}; };
+# ADD MAP 
+assert chkAdd { map = {
+  family = flake.families.inet;
+  table = "myTable";
+  name = "mySet";
+  type = flake.nftTypes.ipv4_addr;
+  map = flake.nftTypes.ipv4_addr;
+  policy = flake.setPolicies.performance;
+  flags = with flake.setFlags; [ constant interval timeout ];
+  elem = [ [ 1 2 ] [ 3 4 ] [ 5 6 ] ];
+  timeout = 10;
+  gc-interval = 10;
+  size = 10;
+}; };
+# ADD ELEMENT 
+assert chkAdd { element = {
+  family = flake.families.inet;
+  table = "myTable";
+  name = "mySet";
+  elem = [ 1 2 3 4 5 6 ];
+}; };
+# ADD FLOWTABLE 
+assert chkAdd { flowtable = {
+  family = flake.families.inet;
+  table = "myTable";
+  name = "myFT";
+  hook = flake.hooks.postrouting;
+  prio = 0;
+  dev = [ "eth0" ];
+}; };
+# ADD COUNTER 
+# ADD QUOTA 
+# ADD CT_HELPER 
+# ADD LIMIT 
+# ADD CT_TIMEOUT 
+# ADD CT_EXPECTATION
+# REPLACE RULE
+# INSERT RULE
 {
   name = "flake-checks";
   type = "derivation";
