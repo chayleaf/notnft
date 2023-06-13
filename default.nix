@@ -899,7 +899,7 @@ let
     operator = mkEnum {
       name = "nftablesOperators";
       description = "nftables operator";
-      enum = operators;
+      enum = operators';
     };
     rejectType = mkEnum {
       name = "nftablesRejectType";
@@ -2658,7 +2658,7 @@ let
     replied.proto = "udp";
     unreplied.proto = "udp";
   };
-  operators = let self = mkEnum "operators" {
+  operators' = mkEnum "operators" {
     "&" = { };
     "|" = { };
     "^" = { };
@@ -2672,21 +2672,22 @@ let
     ">=" = { };
     # bitmask
     "in" = { };
-  }; in self // {
+  };
+  operators = operators' // {
     # create some aliases
-    and = self."&";
-    or = self."|";
-    xor = self."^";
-    lsh = self."<<";
-    rsh = self.">>";
-    eq = self."==";
-    ne = self."!=";
-    lt = self."<";
-    gt = self.">";
-    le = self."<=";
-    ge = self.">=";
-    IN = self."in";
-    in' = self."in";
+    and = operators'."&";
+    or = operators'."|";
+    xor = operators'."^";
+    lsh = operators'."<<";
+    rsh = operators'.">>";
+    eq = operators'."==";
+    ne = operators'."!=";
+    lt = operators'."<";
+    gt = operators'.">";
+    le = operators'."<=";
+    ge = operators'.">=";
+    IN = operators'."in";
+    in' = operators'."in";
   };
   priorities = mkEnum "priorities" {
     raw = {
