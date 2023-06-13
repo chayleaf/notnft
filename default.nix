@@ -29,7 +29,7 @@ let
   enumMode = cfg.enumMode or "normal";
   laxEnums = enumMode == "lax";
   strictEnums = enumMode == "strict";
-  submodule' = { options, finalMerge ? lib.id, skipNulls ? true }:
+  submodule' = { options, finalMerge ? lib.id, skipNulls ? true, freeformType ? null }:
   let
     reqFields = builtins.attrNames (if skipNulls then lib.filterAttrs (k: v: v.type.name != "nullOr") options else options);
     optFields = if skipNulls then builtins.attrNames (lib.filterAttrs (k: v: v.type.name == "nullOr") options) else [];
@@ -44,9 +44,11 @@ let
   in
     submoduleWith' {
       shorthandOnlyDefinesConfig = true;
-      modules = lib.toList {
+      modules = lib.toList ({
         inherit options;
-      };
+      } // (if freeformType != null then {
+        inherit freeformType;
+      } else {}));
       description = "submodule with ${builtins.concatStringsSep " and " (builtins.filter builtins.isString [ reqFieldsDesc optFieldsDesc ])}";
       descriptionClass = "conjunction";
       chk = x: builtins.all (optName: x?${optName}) reqFields;
@@ -186,7 +188,8 @@ let
         else res;
   };
 
-  mkEnum = builtins.mapAttrs (k: v: {
+  mkEnum = enum: builtins.mapAttrs (k: v: {
+    __enum__ = enum;
     __value__ = k;
     __info__ = v;
     __toString = self: self.__value__;
@@ -212,9 +215,10 @@ let
       inherit name description;
       descriptionClass = "noun";
       check =
-        if strictEnums then (x: builtins.elem x (builtins.attrValues enum))
+        let chk = x: builtins.isAttrs x && x?__toString && x?__value__ && x?__enum__ && (builtins.any (y: x.__value__ == y.__value__ && x.__enum__ == y.__enum__) (builtins.attrValues enum));
+        in if strictEnums then chk
         else if laxEnums then (x: builtins.isString x || (builtins.isAttrs x && x?__toString))
-        else (x: builtins.elem x (builtins.attrNames enum) || builtins.elem x (builtins.attrValues enum));
+        else (x: builtins.elem x (builtins.attrNames enum) || chk x);
       merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
         value = toString def.value;
       }) defs);
@@ -386,7 +390,7 @@ let
         };
         elem = {
           type =
-            if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
+            if isMap == true then lib.types.listOf (types.listOfSize2 types.expression)
             else types.expression;
           description = lib.mdDoc ("Initial ${name} element(s)." + (lib.optionalString (isMap != false) " For mappings, an array of arrays with exactly two elements is expected."));
         };
@@ -432,7 +436,7 @@ let
       } // (if withElem then builtins.mapAttrs mkOpt {
         elem = {
           type =
-            if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
+            if isMap == true then lib.types.listOf (types.listOfSize2 types.expression)
             else types.expression;
           description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
         };
@@ -1021,7 +1025,7 @@ let
       finalMerge = x:
         let
           baseDetect = [ "type" "hook" "prio" "policy" "dev" ];
-          reqBase = [ "family" "type" "hook" "prio" "policy" ];
+          reqBase = [ "type" "hook" "prio" "policy" ];
           familyInfo = (families.${x.family or ""} or {}).__info__ or {};
           reqBase' = reqBase ++ (lib.optionals (familyInfo.requireBaseChainDevice or false) [ "dev" ]);
           info = (chainTypes.${x.type or ""} or {}).__info__ or {};
@@ -1500,13 +1504,12 @@ let
         description = "Byte counter value.";
       };
     };
-    mangleStatement = lib.types.submodule {
+    mangleStatement = submodule' {
+      finalMerge = x:
+        if x.key?exthdr || x.key?payload || x.key?meta || x.key?ct || x.key?"ct helper" then x
+        else throw ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
       options.key = lib.mkOption {
-        type = oneOf {
-          name = "nftablesMangleKey";
-          description = "nftables mangle key expression";
-          types = [ types.exthdrExpression types.payloadExpression types.metaExpression types.ctExpression types.ctHelperExpression ];
-        };
+        type = types.expression;
         description = lib.mdDoc "The packet data to be changed, given as an **exthdr**, **payload**, **meta**, **ct** or **ct helper** expression.";
       };
       options.value = lib.mkOption {
@@ -1629,10 +1632,9 @@ let
         type = lib.types.int;
         description = "Port to translate to.";
       };
-      options.flags = lib.mkOption {
+      options.flags = mkNullOption {
         type = lib.types.listOf types.natFlag;
         description = "Flag(s).";
-        default = [ ];
       };
     };
     redirectStatement = types.masqueradeStatement;
@@ -1718,9 +1720,9 @@ let
         description = "Map key.";
         type = types.expression;
       };
-      options.flags = lib.mkOption {
+      options.data = lib.mkOption {
         description = "Mapping expression consisting of value/verdict pairs.";
-        type = types.expression;
+        type = lib.types.listOf (types.listOfSize2 types.expression);
       };
     };
     ctCountStatement = submodule' {
@@ -2090,12 +2092,12 @@ let
       };
     };
     binOpExpression = lib.types.either (types.listOfSize2 types.expression) (submodule' {
-      finalMerge = { lhs, rhs }: [ lhs rhs ];
-      options.lhs = lib.mkOption {
+      finalMerge = { left, right }: [ left right ];
+      options.left = lib.mkOption {
         description = "Left-hand side of the operation.";
         type = types.expression;
       };
-      options.rhs = lib.mkOption {
+      options.right = lib.mkOption {
         description = "Right-hand side of the operation.";
         type = types.expression;
       };
@@ -2134,10 +2136,18 @@ let
         type = types.osfTtl;
       };
     };
+    dslExprHackType = submodule' {
+      skipNulls = false;
+      finalMerge = x: x.__expr__;
+      freeformType = lib.types.unspecified;
+      options.__expr__ = lib.mkOption {
+        type = types.expression;
+      };
+    };
     expression = oneOf {
       name = "nftablesExpression";
       description = "nftables expression";
-      types = [ lib.types.str lib.types.int lib.types.bool (lib.types.listOf types.expression) ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
+      types = [ lib.types.str lib.types.int lib.types.bool (lib.types.listOf types.expression) types.dslExprHackType ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
         inherit (v) type;
         description = "${k} expression.\n\n${v.description}";
       })) {
@@ -2298,7 +2308,7 @@ let
   };
   wildcard = "\\*";
   setReference = s: "@${s}";
-  nftTypes = mkEnum {
+  nftTypes = mkEnum "nftTypes" {
     ipv4_addr.isKey = true;
     ipv6_addr.isKey = true;
     ether_addr.isKey = true;
@@ -2308,30 +2318,30 @@ let
     counter = {};
     quota = {};
   };
-  xtTypes = mkEnum {
+  xtTypes = mkEnum "xtTypes" {
     match = {};
     target = {};
     watcher = {};
   };
-  payloadBases = mkEnum {
+  payloadBases = mkEnum "payloadBases" {
     ll = {};
     nh = {};
     th = {};
   };
-  rtKeys = mkEnum {
+  rtKeys = mkEnum "rtKeys" {
     classid = {};
     nexthop = {};
     mtu = {};
   };
-  ctDirs = mkEnum {
+  ctDirs = mkEnum "ctDirs" {
     original = {};
     reply = {};
   };
-  ngModes = mkEnum {
+  ngModes = mkEnum "ngModes" {
     inc = {};
     random = {};
   };
-  fibResults = mkEnum {
+  fibResults = mkEnum "fibResults" {
     # get output interface id
     oif = {};
     # get output interface name
@@ -2339,24 +2349,24 @@ let
     # get output address type
     type = {};
   };
-  fibFlags = mkEnum {
+  fibFlags = mkEnum "fibFlags" {
     saddr = {};
     daddr = {};
     mark = {};
     iif = {};
     oif = {};
   };
-  socketKeys = mkEnum {
+  socketKeys = mkEnum "socketKeys" {
     transparent = {};
   };
-  osfKeys = mkEnum {
+  osfKeys = mkEnum "osfKeys" {
     name = {};
   };
-  osfTtl = mkEnum {
+  osfTtl = mkEnum "osfTtl" {
     loose = {};
     skip = {};
   };
-  metaKeys = mkEnum {
+  metaKeys = mkEnum "metaKeys" {
     length = {};
     protocol = {};
     priority = {};
@@ -2385,7 +2395,7 @@ let
     l4proto = {};
     secpath = {};
   };
-  families = mkEnum {
+  families = mkEnum "families" {
     ip = {
       hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
       isIp = true;
@@ -2409,29 +2419,29 @@ let
       requireBaseChainDevice = true;
     };
   };
-  chainPolicies = mkEnum {
+  chainPolicies = mkEnum "chainPolicies" {
     accept = {};
-    reject = {};
+    drop = {};
   };
-  setPolicies = mkEnum {
+  setPolicies = mkEnum "setPolicies" {
     performance = {};
     memory = {};
   };
-  setFlags = mkEnum {
+  setFlags = mkEnum "setFlags" {
     constant = {};
     interval = {};
     timeout = {};
   };
-  natFlags = mkEnum {
+  natFlags = mkEnum "natFlags" {
     random = {};
     fully-random = {};
     persistent = {};
   };
-  queueFlags = mkEnum {
+  queueFlags = mkEnum "queueFlags" {
     bypass = {};
     fanout = {};
   };
-  logLevels = mkEnum {
+  logLevels = mkEnum "logLevels" {
     emerg = {};
     alert = {};
     crit = {};
@@ -2442,7 +2452,7 @@ let
     debug = {};
     audit = {};
   };
-  logFlags = mkEnum {
+  logFlags = mkEnum "logFlags" {
     "tcp sequence" = {};
     "tcp options" = {};
     "ip options" = {};
@@ -2450,7 +2460,7 @@ let
     ether = {};
     all = {};
   };
-  chainTypes = mkEnum {
+  chainTypes = mkEnum "chainTypes" {
     # Standard chain type to use when in doubt.
     filter = { };
     # Chains of this type perform Native Address Translation based on conntrack entries.
@@ -2468,7 +2478,7 @@ let
       hooks = [ "output" ];
     };
   };
-  hooks = mkEnum {
+  hooks = mkEnum "hooks" {
     prerouting = {};
     input = {};
     forward = {};
@@ -2476,7 +2486,7 @@ let
     postrouting = {};
     ingress = {};
   };
-  l4protocols = mkEnum {
+  l4protocols = mkEnum "l4protocols" {
     tcp = { inCtHelper = true; };
     udp = { inCtHelper = true; };
     dccp = {};
@@ -2486,35 +2496,36 @@ let
     icmp = {};
     generic = {};
   };
-  l3protocols = mkEnum {
+  l3protocols = mkEnum "l3protocols" {
     ip = {};
     ip6 = {};
     inet = {};
     arp = {};
   };
-  timeUnits = mkEnum {
+  timeUnits = mkEnum "timeUnits" {
     second = {};
     minute = {};
     hour = {};
     day = {};
+    week = {};
   };
-  byteUnits = mkEnum {
+  byteUnits = mkEnum "byteUnits" {
     bytes = {};
     kbytes = {};
     mbytes = {};
     packets = { onlyRate = true; };
   };
-  rejectTypes = mkEnum {
+  rejectTypes = mkEnum "rejectTypes" {
     icmpx = {};
     icmp = {};
     icmpv6 = {};
     "tcp reset" = {};
   };
-  setOperators = mkEnum {
+  setOperators = mkEnum "setOperators" {
     add = {};
     update = {};
   };
-  payloadProtocols = mkEnum {
+  payloadProtocols = mkEnum "payloadProtocols" {
     ether.fields = [ "daddr" "saddr" "type" ];
     vlan.fields = [ "id" "dei" "pcp" "type" ];
     arp.fields = [ "htype" "ptype" "hlen" "plen" "operation" "saddr ip" "saddr ether" "daddr ip" "daddr ether" ];
@@ -2538,14 +2549,14 @@ let
     gretap.fields = [ "vni" "flags" ];
     vxlan.fields = [ "vni" "flags" ];
   };
-  payloadFields = mkEnum (builtins.foldl'
+  payloadFields = mkEnum "payloadFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
         (x: x.__info__.fields)
         (builtins.attrValues payloadProtocols))));
-  exthdrs = mkEnum {
+  exthdrs = mkEnum "exthdrs" {
     hbh.fields = [ "nexthdr" "hdrlength" ];
     rt.fields = [ "nexthdr" "hdrlength" "type" "seg-left" ];
     frag.fields = [ "nexthdr" "frag-off" "more-fragments" "id" ];
@@ -2553,14 +2564,14 @@ let
     mh.fields = [ "nexthdr" "hdrlength" "checksum" "type" ];
     srh.fields = [ "flags" "tag" "sid" "seg-left" ];
   };
-  exthdrFields = mkEnum (builtins.foldl'
+  exthdrFields = mkEnum "exthdrFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
         (x: x.__info__.fields)
         (builtins.attrValues exthdrs))));
-  tcpOptions = mkEnum {
+  tcpOptions = mkEnum "tcpOptions" {
     eol.fields = [ ];
     nop.fields = [ ];
     maxseg.fields = [ "length" "size" ];
@@ -2573,14 +2584,14 @@ let
     sack3.fields = [ "length" "left" "right" ];
     timestamp.fields = [ "length" "tsval" "tsecr" ];
   };
-  tcpOptionFields = mkEnum (builtins.foldl'
+  tcpOptionFields = mkEnum "tcpOptionFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
         (x: x.__info__.fields)
         (builtins.attrValues tcpOptions))));
-  sctpChunks = mkEnum {
+  sctpChunks = mkEnum "sctpChunks" {
     data.fields = [ "type" "flags" "length" "tsn" "stream" "ssn" "ppid" ];
     init.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
     init-ack.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
@@ -2600,7 +2611,7 @@ let
     forward-tsn.fields = [ "type" "flags" "length" "new-cum-tsn" ];
     asconf.fields = [ "type" "flags" "length" "seqno" ];
   };
-  sctpChunkFields = mkEnum (builtins.foldl'
+  sctpChunkFields = mkEnum "sctpChunkFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
@@ -2612,7 +2623,7 @@ let
     nf = ff // { dir = null; }; # null/false
     tf = ff // { dir = true; }; # etc
     tt = tf // { family = true; };
-  in mkEnum {
+  in mkEnum "ctKeys" {
     state = ff;
     direction = ff;
     status = ff;
@@ -2633,41 +2644,51 @@ let
     saddr = tt;
     daddr = tt;
   };
-  connectionStates = mkEnum {
-    close = "tcp";
-    close_wait = "tcp";
-    established = "tcp";
-    fin_wait = "tcp";
-    last_ack = "tcp";
-    retrans = "tcp";
-    syn_recv = "tcp";
-    syn_sent = "tcp";
-    time_wait = "tcp";
-    unack = "tcp";
-    replied = "udp";
-    unreplied = "udp";
+  connectionStates = mkEnum "connectionStates" {
+    close.proto = "tcp";
+    close_wait.proto = "tcp";
+    established.proto = "tcp";
+    fin_wait.proto = "tcp";
+    last_ack.proto = "tcp";
+    retrans.proto = "tcp";
+    syn_recv.proto = "tcp";
+    syn_sent.proto = "tcp";
+    time_wait.proto = "tcp";
+    unack.proto = "tcp";
+    replied.proto = "udp";
+    unreplied.proto = "udp";
   };
-  operators = let self = mkEnum {
-    and = "&";
-    or = "|";
-    xor = "^";
-    lsh = "<<";
-    rsh = ">>";
-    eq = "==";
-    ne = "!=";
-    lt = "<";
-    gt = ">";
-    le = "<=";
-    ge = ">=";
+  operators = let self = mkEnum "operators" {
+    "&" = { };
+    "|" = { };
+    "^" = { };
+    "<<" = { };
+    ">>" = { };
+    "==" = { };
+    "!=" = { };
+    "<" = { };
+    ">" = { };
+    "<=" = { };
+    ">=" = { };
     # bitmask
-    "in" = "in";
+    "in" = { };
   }; in self // {
-    # in is reserved, so also create some aliases
+    # create some aliases
+    and = self."&";
+    or = self."|";
+    xor = self."^";
+    lsh = self."<<";
+    rsh = self.">>";
+    eq = self."==";
+    ne = self."!=";
+    lt = self."<";
+    gt = self.">";
+    le = self."<=";
+    ge = self.">=";
     IN = self."in";
     in' = self."in";
-    contains = self."in";
   };
-  priorities = mkEnum {
+  priorities = mkEnum "priorities" {
     raw = {
       value = family: -300;
       families = [ "ip" "ip6" "inet" ];
@@ -2699,9 +2720,81 @@ let
       families = [ "bridge" ];
     };
   };
-in {
+  # tcp_flag
+  tcpFlags = builtins.mapAttrs (k: v: k) {
+    fin = 1;
+    syn = 2;
+    rst = 4;
+    psh = 8;
+    ack = 16;
+    urg = 32;
+    ecn = 64;
+    cwr = 128;
+  };
+  # fib_addrtype
+  fibTypes = builtins.mapAttrs (k: v: k) {
+    unspec = 0;
+    unicast = 1;
+    local = 2;
+    broadcast = 3;
+    anycast = 4;
+    multicast = 5;
+    blackhole = 6;
+    unreachable = 7;
+    prohibit = 8;
+  };
+  # icmp_type
+  icmpTypes = builtins.mapAttrs (k: v: k) {
+    echo-reply = 0;
+    destination-unreachable = 3;
+    source-quench = 4;
+    redirect = 5;
+    echo-request = 8;
+    router-advertisement = 9;
+    router-solicitation = 10;
+    time-exceeded = 11;
+    parameter-problem = 12;
+    timestamp-request = 13;
+    timestamp-reply = 14;
+    info-request = 15;
+    info-reply = 16;
+    address-mask-request = 17;
+    address-mask-reply = 18;
+  };
+  icmpv6Types = builtins.mapAttrs (k: v: k) {
+    destination-unreachable = 1;
+    packet-too-big = 2;
+    time-exceeded = 3;
+    parameter-problem = 4;
+    echo-request = 128;
+    echo-reply = 129;
+    mld-listener-query = 130;
+    mld-listener-report = 131;
+    mld-listener-done = 132;
+    mld-listener-reduction = 132;
+    nd-router-solicit = 133;
+    nd-router-advert = 134;
+    nd-neighbor-solicit = 135;
+    nd-neighbor-advert = 136;
+    nd-redirect = 137;
+    router-renumbering = 138;
+    ind-neighbor-solicit = 141;
+    ind-neighbor-advert = 142;
+    mld2-listener-report = 143;
+  };
+  ctStates = builtins.mapAttrs (k: v: k) {
+    invalid = 1;
+    established = 2;
+    related = 4;
+    new = 8;
+    untracked = 64;
+  };
+  exists = true;
+  missing = false;
+in rec {
   config.notnft = {
-    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags;
+    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags operators tcpFlags fibTypes exists missing icmpTypes icmpv6Types timeUnits ctStates;
+    dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
   };
   options.notnftConfig.enumMode = lib.mkOption {
     default = "normal";

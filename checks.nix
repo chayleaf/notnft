@@ -1,7 +1,7 @@
 { flake, lib, ... }:
 
 let
-  inherit (flake) types;
+  inherit (flake) types dsl;
   inherit (lib.modules) evalModules;
   # check that `expr` is of type `type`, and that the merged value equals `expected`
   # if `json` is true, compare jsons
@@ -21,13 +21,15 @@ let
     # assert lib.assertMsg val.success "Invalid type for ${builtins.toJSON expr}";
     lib.assertMsg (if json then builtins.toJSON val == builtins.toJSON expected else val == expected) "Invalid value for ${builtins.toJSON expr} (got ${builtins.toJSON val}, expected ${builtins.toJSON expected})";
   chkTypeEq = chkTypeEq' false;
+  chkTypeJson' = chkTypeEq' true;
   # check that `x` is an expression and the merged value equals `x`
   chkExpr = x: chkTypeEq types.expression x x;
+  chkTypeJson = type: x: lib.trace (builtins.toJSON x) chkTypeJson' type x x;
   # check that `x` is an expression and the merged value equals `x` when both are converted to json
   # how this is used: enum values in notnft have a __tostring attr, which automatically gets called
   # by toJSON. This means that despite merging to a different value (string rather than opaque enum),
   # values are still considered equal.
-  chkExprJson = x: chkTypeEq' true types.expression x x;
+  chkExprJson = chkTypeJson types.expression;
   # check that the second arg is an expression and the merged value equals the first arg
   chkExprEq = chkTypeEq types.expression;
   # check that evaluation of `x` fails
@@ -46,7 +48,7 @@ let
     fails (chkDelete (addAll { handle = 5; } x));
   chkDelete = x: chkCommand { delete = x; };
   fieldsRequired = fields: func: x: assert func x; builtins.all (field: fails (func (removeAll [ field ] x))) fields;
-  fieldsOptional = fields: func: x: assert func x; builtins.all (field: func (removeAll [ field ] x)) fields;
+  # fieldsOptional = fields: func: x: assert func x; builtins.all (field: func (removeAll [ field ] x)) fields;
   chkAddDelete = x:
     assert chkAdd x;
     assert chkDelete x;
@@ -151,7 +153,7 @@ assert chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.
 assert fails (chkExpr { fib = { result = "oif"; flags = [ "saddrr" ]; }; });
 # |/^/&/<</>> exprs
 assert chkExpr { "|" = [ 5 5 ]; };
-assert chkExprEq { "|" = [ 5 5 ]; } { "|" = { lhs = 5; rhs = 5; }; };
+assert chkExprEq { "|" = [ 5 5 ]; } { "|" = { left = 5; right = 5; }; };
 assert chkExpr { "^" = [ { "&" = [ 1 2 ]; } { "<<" = [ { ">>" = [ 5 6 ]; } 7 ]; } ]; };
 # verdicts (accept/drop/continue/return/jump/goto exprs)
 assert chkExpr { accept = null; };
@@ -306,6 +308,78 @@ assert chkAdd { flowtable = {
 # ADD CT_EXPECTATION
 # REPLACE RULE
 # INSERT RULE
+
+
+# test config (manually converted from my old router)
+# but it isn't complete, i decided i need a dsl
+assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; with tcpFlags; ruleset {
+  filter = table { family = families.netdev; } {
+    ingress_common = with tcpFlags; chain {}
+      [(is.eq (op."&" tcp.flags (fin + syn)) (fin + syn)) drop]
+      [(is.eq (op."&" tcp.flags (op."&" syn rst)) (op."&" syn rst)) drop]
+      [(is.eq (op."&" tcp.flags (op."&" [ fin syn rst psh ack urg ])) 0) drop]
+      [(is.in' tcp.flags syn) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
+      [(is.eq ip.saddr "127.0.0.1") drop]
+      [(is.eq ip6.saddr "::1") drop]
+      [(is.eq (fib (with fibFlags; [ saddr iif ]) fibResults.oif) missing) drop]
+      [return];
+
+    ingress_lan = chain { type = chainTypes.filter; hook = hooks.ingress; dev = "lan0"; prio = -500; policy = chainPolicies.accept; }
+      [(jump "ingress_common")];
+
+    ingress_wan = with fibTypes; chain { type = chainTypes.filter; hook = hooks.ingress; dev = "wan0"; prio = -500; policy = chainPolicies.drop; }
+      [(jump "ingress_common")]
+      [(is.ne (fib (with fibFlags; [ daddr iif ]) fibResults.type) (set' [ local broadcast multicast ])) drop]
+      [(is.eq ip.protocol (set' [ local broadcast multicast ])) drop]
+      [(is.eq ip.protocol "icmp") (is.eq icmp.type (with icmpTypes; set' [ info-request address-mask-request router-advertisement router-solicitation redirect ])) drop]
+      [(is.eq ip6.nexthdr "icmpv6") (is.eq icmpv6.type (with icmpv6Types; set' [ mld-listener-query mld-listener-report mld-listener-reduction nd-router-solicit nd-router-advert nd-redirect router-renumbering ])) drop]
+      [(is.eq ip.protocol "icmp") (limit' { rate = 20; per = timeUnits.second; }) accept]
+      [(is.eq ip6.nexthdr "icmpv6") (limit' { rate = 20; per = timeUnits.second; }) accept]
+      [(is.eq ip.protocol "icmp") drop]
+      [(is.eq ip6.nexthdr "icmpv6") drop]
+      [(is.eq ip.protocol (set' [ "tcp" "udp" ])) (is.eq th.dport (set' [ 22 53 80 443 853 ])) accept]
+      [(is.eq ip6.nexthdr (set' [ "tcp" "udp" ])) (is.eq th.dport (set' [ 22 53 80 443 853 ])) accept];
+  };
+  global = table { family = families.inet; } {
+    inbound_wan = chain {}
+      [(is.eq ip.protocol "icmp") (is.ne icmp.type (with icmpTypes; set' [ destination-unreachable echo-request time-exceeded parameter-problem ])) drop]
+      [(is.eq ip6.nexthdr "icmpv6") (is.ne icmpv6.type (with icmpv6Types; set' [ destination-unreachable echo-request time-exceeded parameter-problem packet-too-big nd-neighbor-solicit ])) drop]
+      [(is.eq ip.protocol "icmp") accept]
+      [(is.eq ip6.nexthdr "icmpv6") accept]
+      [(is.eq th.dport 22) accept];
+    inbound_lan = chain {}
+      [accept];
+    inbound = chain { type = chainTypes.filter; hook = hooks.input; prio = 0; policy = chainPolicies.drop; }
+      [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
+      [(is.eq (op."&" tcp.flags tcpFlags.syn) 0) (is.eq ct.state ctStates.new) drop]
+      [(vmap meta.iifname { lo = accept; "wan0" = jump "inbound_wan"; "lan0" = jump "inbound_lan"; })];
+    forward = chain { type = chainTypes.filter; hook = hooks.forward; prio = 0; policy = chainPolicies.drop; }
+      [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
+      [(is.eq meta.iifname "wan0") (is.eq meta.oifname "lan0") accept]
+      [(is.eq meta.iifname "lan0") accept]
+      [(is.eq meta.iifname "wan0") (is.eq meta.oifname "wan0") accept];
+    postrouting = chain { type = chainTypes.nat; hook = hooks.postrouting; prio = 0; policy = chainPolicies.accept; }
+      [(is.eq meta.protocol (set' [ "ip" "ip6" ])) (is.eq meta.iifname "lan0") (is.eq meta.oifname "wan0") masquerade];
+    block4 = set { type = nftTypes.ipv4_addr; flags = with setFlags; [ interval ]; } [
+      (cidr "194.190.137.0" 24)
+      (cidr "194.190.157.0" 24)
+      (cidr "194.190.21.0" 24)
+      (cidr "194.226.130.0" 23)
+    ];
+    block6 = set { type = nftTypes.ipv6_addr; flags = with setFlags; [ interval ]; };
+    force_unvpn4 = set { type = nftTypes.ipv4_addr; flags = with setFlags; [ interval ]; };
+    force_unvpn6 = set { type = nftTypes.ipv6_addr; flags = with setFlags; [ interval ]; };
+    prerouting = chain { type = chainTypes.filter; hook = hooks.prerouting; prio = 0; policy = chainPolicies.accept; }
+      [(mangle meta.mark ct.mark)]
+      [(is.ne meta.mark 0) accept]
+      [(is.eq meta.iifname "lan0") (mangle meta.mark 2)]
+      [(is.eq ip.daddr "@force_unvpn4") (mangle meta.mark 1)]
+      [(is.eq ip6.daddr "@force_unvpn6") (mangle meta.mark 1)]
+      [(is.eq ip.daddr "@block4") drop]
+      [(is.eq ip6.daddr "@block6") drop]
+      [(mangle ct.mark meta.mark)];
+  };
+});
 {
   name = "flake-checks";
   type = "derivation";
