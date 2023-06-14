@@ -1,15 +1,21 @@
 #!/usr/bin/env -S nix eval --raw --impure -f
 let
   pkgs = import <nixpkgs> { };
-  inherit (pkgs) callPackage;
+  inherit (pkgs) callPackage lib;
   config = (callPackage ./. { }).config;
   inherit (config) notnft;
+  evalRuleset = val: (lib.modules.evalModules {
+    modules = [ {
+      config.val = val;
+      options.val = lib.mkOption { type = notnft.types.ruleset; };
+    } ];
+  }).config.val;
 
   inherit (notnft) dsl;
 in
 with notnft; with dsl; with dsl.payload;
 
-builtins.toJSON (ruleset {
+builtins.toJSON (evalRuleset (ruleset {
   filter = table { family = families.netdev; } {
     ingress_common = with tcpFlags; chain 
       [(is.eq (op."&" tcp.flags (fin + syn)) (fin + syn)) drop]
@@ -76,4 +82,4 @@ builtins.toJSON (ruleset {
       [(is.eq ip6.daddr "@block6") drop]
       [(mangle ct.mark meta.mark)];
   };
-})
+}))

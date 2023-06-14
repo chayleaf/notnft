@@ -11,7 +11,6 @@ let
       {
         options.val = lib.mkOption {
           inherit type;
-          default = throw "error";
         };
         config.val = expr;
       }
