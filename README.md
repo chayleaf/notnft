@@ -23,9 +23,8 @@ changes upstream.
 - Q: Is this limited in any way?
 - A: I fully support the current JSON specification, but the nftables
   DSL has a different feature set compared to the JSON API (some
-  features are only present in the former, some only in the latter, at
-  least according to the spec). I might add a compiler to .nft files
-  some day.
+  features are only present in the former, some only in the latter). I
+  might add a compiler to .nft files some day.
 - Q: Why the name?
 - A: I already created [notlua](https://github.com/chayleaf/notlua), so
   this is the next project in that "series".
