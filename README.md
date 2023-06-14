@@ -14,6 +14,8 @@ most important thing is not to rely on the official documentation for
 general you really can't trust it). I'll try to push some documentation
 changes upstream.
 
+- Q: How can I quickly test it?
+- A: Clone this repo and edit/run `./sample.nix`
 - Q: Why?
 - A: I'm working on a fresh NixOS router config, and wanted to nixify
   the nftables syntax. Since this project uses nixpkgs's module system,
