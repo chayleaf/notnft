@@ -1,8 +1,10 @@
-Documentation wildly differs from the actual code! This is a dissection
-of the code in `parser_json.c`. Note that I also had to manually check
-each type definition/"template" to make sure that the
-options/fields/keywords supported actually match what's written in the
-code.
+(based on 1.0.7)
+
+Nftables' documentation wildly differs from the actual code! This is a
+dissection of the code in `parser_json.c`. Note that I also had to
+manually check each type definition/"template" to make sure that the
+options/fields/keywords I support actually match what's written in
+nftables code.
 
 Q: what the hell is a counter reference/quota reference/synproxy
 reference/ct timeout reference/ct expectation reference? I just use
