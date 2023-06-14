@@ -2,6 +2,7 @@
 , config ? {}
 , ...
 }:
+# https://git.netfilter.org/nftables/tree/src/parser_json.c?id=9f5dc2b6297cb2507718222c7309516207420288
 
 /*
 data types:
@@ -29,7 +30,101 @@ let
   enumMode = cfg.enumMode or "normal";
   laxEnums = enumMode == "lax";
   strictEnums = enumMode == "strict";
-  submodule' = { options, finalMerge ? lib.id, skipNulls ? true, freeformType ? null }:
+  CTX_F_RHS = 1;
+  CTX_F_STMT = 2;
+  CTX_F_PRIMARY = 4;
+  # CTX_F_DTYPE = 8;
+  CTX_F_SET_RHS = 16;
+  CTX_F_MANGLE = 32;
+  CTX_F_SES = 64; # set_elem_expr_stmt
+  CTX_F_MAP = 128; # LHS of map_expr
+  CTX_F_CONCAT = 256;
+  CTX_F_ALL = 1 + 2 + 4 + 8 + 16 + 32 + 64 + 128 + 256;
+  isImmediateExpr = expr: builtins.isInt expr || builtins.isString expr || builtins.isPath expr || builtins.isBool expr;
+  # this assumes the structure is already checked, it just checks whether the expressions make sense in this context
+  isValidExpr = ctx: expr:
+    let
+      hasAllBits = bits: x: builtins.bitAnd bits x == bits;
+      isValid = isValidExpr ctx;
+      isValidPrim = isValidExpr (builtins.bitOr CTX_F_PRIMARY ctx);
+      isValidLhs = isValidExpr (builtins.bitOr CTX_F_MAP ctx);
+      isValidRhs = isValidExpr (builtins.bitOr CTX_F_RHS ctx);
+      isValidSetRhs = isValidExpr (builtins.bitOr CTX_F_SET_RHS ctx);
+      isValidCat = isValidExpr (builtins.bitOr CTX_F_CONCAT ctx);
+    in
+      if builtins.isInt expr || builtins.isString expr || builtins.isPath expr then true
+      else if builtins.isBool expr then (hasAllBits CTX_F_RHS ctx) != 0 || (hasAllBits CTX_F_PRIMARY ctx) != 0
+      else if builtins.isList expr then (
+        if hasAllBits CTX_F_PRIMARY ctx then false
+        else if hasAllBits CTX_F_RHS ctx || hasAllBits CTX_F_STMT ctx then builtins.all isValid expr
+        else false)
+      else if !(builtins.isAttrs expr) then false
+      else if builtins.length (builtins.attrNames expr) != 1 then false
+      # extracted from src/parser_json.c
+      else let
+        key = builtins.head (builtins.attrNames expr);
+        contexts = builtins.mapAttrs (k: builtins.foldl' builtins.bitOr 0) {
+          concat = [ CTX_F_RHS CTX_F_STMT /*CTX_F_DTYPE*/ CTX_F_SET_RHS CTX_F_SES CTX_F_MAP ];
+          set = [ CTX_F_RHS CTX_F_STMT ];
+          map = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS ];
+          prefix = [ CTX_F_RHS CTX_F_SET_RHS CTX_F_STMT CTX_F_CONCAT ];
+          range = [ CTX_F_RHS CTX_F_SET_RHS CTX_F_STMT CTX_F_CONCAT ];
+          payload = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          exthdr = [ CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          "tcp option" = [ CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_CONCAT ];
+          "ip option" = [ CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_CONCAT ];
+          "sctp chunk" = [ CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_CONCAT ];
+          meta = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          osf = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_MAP CTX_F_CONCAT ];
+          ipsec = [ CTX_F_PRIMARY CTX_F_MAP CTX_F_CONCAT ];
+          socket = [ CTX_F_PRIMARY CTX_F_CONCAT ];
+          rt = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          ct = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_MANGLE CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          numgen = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          jhash = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          symhash = [ CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          fib = [ CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          "|" = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          "^" = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          "&" = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          ">>" = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          "<<" = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SET_RHS CTX_F_SES CTX_F_MAP CTX_F_CONCAT ];
+          accept = [ CTX_F_RHS CTX_F_SET_RHS ];
+          drop = [ CTX_F_RHS CTX_F_SET_RHS ];
+          continue = [ CTX_F_RHS CTX_F_SET_RHS ];
+          jump = [ CTX_F_RHS CTX_F_SET_RHS ];
+          goto = [ CTX_F_RHS CTX_F_SET_RHS ];
+          return = [ CTX_F_RHS CTX_F_SET_RHS ];
+          elem = [ CTX_F_RHS CTX_F_STMT CTX_F_PRIMARY CTX_F_SES ];
+        };
+        extraChecks = let
+          binOpCheck = expr:
+            isValidPrim (builtins.head expr)
+            && isValidRhs (builtins.head (builtins.tail expr));
+        in {
+          jhash = { expr, ... }: isValid expr;
+          "|" = binOpCheck;
+          "^" = binOpCheck;
+          "&" = binOpCheck;
+          ">>" = binOpCheck;
+          "<<" = binOpCheck;
+          concat = builtins.all isValidCat;
+          prefix = isValidPrim;
+          range = builtins.all isValidPrim;
+          set = expr:
+            if builtins.isList expr then builtins.all (elem:
+              if builtins.isList elem && builtins.length elem == 2
+              then isValidRhs (builtins.head elem) && isValidSetRhs (builtins.head (builtins.tail elem))
+              else isValidRhs elem) expr
+            else isImmediateExpr expr;
+          map = { key, data }: isValidLhs key && isValidRhs data;
+          elem = { val, ... }: isValidExpr val;
+        };
+        in
+        hasAllBits ctx (contexts.${key} or CTX_F_ALL)
+        && (extraChecks.${key} or (expr: true)) expr.${key};
+
+  submodule' = { options, finalMerge ? lib.id, skipNulls ? true, freeformType ? null, chk ? null }:
   let
     reqFields = builtins.attrNames (if skipNulls then lib.filterAttrs (k: v: v.type.name != "nullOr") options else options);
     optFields = if skipNulls then builtins.attrNames (lib.filterAttrs (k: v: v.type.name == "nullOr") options) else [];
@@ -51,7 +146,7 @@ let
       } else {}));
       description = "submodule with ${builtins.concatStringsSep " and " (builtins.filter builtins.isString [ reqFieldsDesc optFieldsDesc ])}";
       descriptionClass = "conjunction";
-      chk = x: builtins.all (optName: x?${optName}) reqFields;
+      chk = if chk != null then chk else x: builtins.all (optName: x?${optName}) reqFields;
       inherit finalMerge skipNulls;
     };
   submoduleSK = key: val: submodule' {
@@ -169,9 +264,9 @@ let
       };
     };
 
-  oneOf = { name, description, descriptionClass ? "noun", types }: lib.types.mkOptionType rec {
+  oneOf = { name, description, descriptionClass ? "noun", types, chk? (_: true) }: lib.types.mkOptionType rec {
     inherit name description descriptionClass;
-    check = x: builtins.any (type: type.check x) types;
+    check = x: builtins.any (type: type.check x) types && chk x;
     nestedTypes = builtins.listToAttrs (lib.imap0 (i: x: { name = toString i; value = x; }) types);
     typeMerge = null;
     merge = loc: defs:
@@ -195,16 +290,15 @@ let
     __toString = self: self.__value__;
   });
   types =
-    let mkName = { name, description }: lib.mkOptionType {
+    let mkName = { name, description, addAt ? false }: lib.mkOptionType {
       name = "${name}";
       description = "${description}";
       descriptionClass = "noun";
-      check = x: builtins.isString x || (builtins.isAttrs x && x?name);
+      check = x: (builtins.isString x && (!addAt || lib.hasPrefix "@" x)) || (builtins.isAttrs x && x?name);
       merge = loc: defs: lib.mergeOneOption loc (map (def@{ value, ... }: def // {
         value =
-          if builtins.isString value then value
-          else if builtins.isAttrs value && value?name then value.name
-          else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}";
+          if builtins.isAttrs value then (if addAt then "@${value.name}" else value.name)
+          else toString value;
       }) defs);
     };
     mkNullOption = attrs: lib.mkOption (attrs // {
@@ -321,7 +415,7 @@ let
       }
       // (if withExpr then builtins.mapAttrs mkOpt {
         expr = {
-          type = lib.types.nonEmptyListOf types.statement;
+          type = lib.types.listOf types.statement;
           description = lib.mdDoc "An array of statements this rule consists of. In input, it is used in **add**/**insert**/**replace** commands only.";
         };
       } else {})
@@ -350,7 +444,17 @@ let
       mkOpt = x: if req x then lib.mkOption else mkNullOption;
       name = if isMap == true then "map" else "set";
     in submodule' {
-      inherit finalMerge;
+      finalMerge = ret:
+        if ret?expr then
+          let expr = ret.expr; in assert lib.assertMsg
+            (if builtins.isList expr then builtins.all (elem:
+              if builtins.isList elem && builtins.length elem == 2
+              then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
+              else isValidExpr CTX_F_RHS elem) expr
+            else isImmediateExpr expr)
+            "Set/map add command's exprs are invalid in this context";
+          finalMerge ret
+        else finalMerge ret;
       options = builtins.mapAttrs mkOpt {
         family = {
           type = types.family;
@@ -372,7 +476,7 @@ let
       } else {})
       // (if withExtraFields && isMap != false then builtins.mapAttrs mkOpt {
         map = {
-          type = lib.types.either (lib.types.nonEmptyListOf types.valType) types.valType;
+          type = types.type;
           description =
             if isMap == true then
               "Type of values this map maps to."
@@ -406,6 +510,10 @@ let
           type = lib.types.int;
           description = "Maximum number of elements supported.";
         };
+        stmt = {
+          type = lib.types.listOf types.statement;
+          description = "Undocumented upstream";
+        };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
@@ -419,7 +527,17 @@ let
       mkOpt = x: if req x then lib.mkOption else mkNullOption;
       name = if isMap == true then "map" else "set";
     in submodule' {
-      inherit finalMerge;
+      finalMerge = ret:
+        if ret?elem then
+          let expr = ret.elem; in assert lib.assertMsg
+            (if builtins.isList expr then builtins.all (elem:
+              if builtins.isList elem && builtins.length elem == 2
+              then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
+              else isValidExpr CTX_F_RHS elem) expr
+            else isImmediateExpr expr)
+            "Element add command's exprs are invalid in this context";
+          finalMerge ret
+        else finalMerge ret;
       options = builtins.mapAttrs mkOpt {
         family = {
           type = types.family;
@@ -511,6 +629,10 @@ let
           type = lib.types.int;
           description = "Byte counter value.";
         };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
+        };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
@@ -552,6 +674,10 @@ let
           default = false;
           description = "If true, match if the quota has been exceeded.";
         };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
+        };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
@@ -559,7 +685,39 @@ let
         };
       } else {});
     };
-    mkCtHelperType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
+    mkSecmarkType = { finalMerge ? lib.id, reqFields ? [], withExtraFields ? false }:
+    let
+      req = x: builtins.elem x reqFields;
+      mkOpt = x: if req x then lib.mkOption else mkNullOption;
+    in submodule' {
+      inherit finalMerge;
+      options = builtins.mapAttrs mkOpt {
+        family = {
+          type = types.family;
+          description = "The table's family";
+        };
+        table = {
+          type = types.tableName;
+          description = "The table's name";
+        };
+        name = {
+          type = lib.types.str;
+          description = "The secmark's name";
+        };
+      }
+      // (if withExtraFields then builtins.mapAttrs mkOpt {
+        context = {
+          type = lib.types.str;
+          description = "Undocumented upstream.";
+        };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
+        };
+      } else {});
+    };
+    # no handle here!
+    mkCtHelperType = { finalMerge ? lib.id, reqFields ? [], withExtraFields ? false }:
     let
       req = x: builtins.elem x reqFields;
       mkOpt = x: if req x then lib.mkOption else mkNullOption;
@@ -592,10 +750,9 @@ let
           type = types.l3Proto;
           description = lib.mdDoc ''The ct helper's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
-        handle = {
-          type = lib.types.int;
-          description = lib.mdDoc "The ct helper’s handle. In input, it is used by the **delete** command only.";
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
         };
       } else {});
     };
@@ -629,20 +786,29 @@ let
           description = lib.mdDoc ''Time unit to apply the limit to, e.g. **"week"**, **"day"**, **"hour"**, etc. If omitted, defaults to **"second"**.'';
           defaultText = lib.literalExpression "second";
         };
+        rate_unit = {
+          type = types.rateUnit;
+          description = lib.mdDoc ''Unit of rate values. If omitted, defaults to **"packets"**.'';
+          defaultText = lib.literalExpression "packets";
+        };
         burst = {
           type = lib.types.int;
           description = lib.mdDoc "The limit’s burst value. If omitted, defaults to **0**.";
           defaultText = lib.literalExpression 0;
         };
-        unit = {
+        burst_unit = {
           type = types.rateUnit;
-          description = lib.mdDoc ''Unit of rate and burst values. If omitted, defaults to **"packets"**.'';
+          description = lib.mdDoc ''Unit of burst values. If omitted, defaults to **"bytes"**. Has no effect if `rate_unit` is set to **"packets"**.'';
           defaultText = lib.literalExpression "packets";
         };
         inv = {
           type = lib.types.bool;
           description = lib.mdDoc "If true, match if limit was exceeded. If omitted, defaults to **false**.";
           defaultText = lib.literalExpression false;
+        };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
         };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
@@ -676,17 +842,17 @@ let
           type = types.ctHelperL4Proto;
           description = "The ct timeout object’s layer 4 protocol.";
         };
-        state = {
-          type = types.connectionState;
-          description = lib.mdDoc ''The connection state name, e.g. **"established"**, **"syn_sent"**, **"close"** or **"close_wait"**, for which the timeout value has to be updated.'';
-        };
-        value = {
-          type = lib.types.int;
-          description = "The updated timeout value for the specified connection state.";
-        };
         l3proto = {
           type = types.l3Proto;
           description = lib.mdDoc ''The ct timeout object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
+        };
+        policy = {
+          type = lib.types.attrsOf lib.types.int;
+          description = "Undocumented upstream, each key might be conn state name (`established`, `syn_sent`, `close_wait`, etc), each val might be timeout value";
+        };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
         };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
@@ -736,10 +902,53 @@ let
           type = lib.types.int;
           description = "The maximum count of expectations to be living in the same time.";
         };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
+        };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The ct expectation object’s handle. In input, it is used by the **delete** command only.";
+        };
+      } else {});
+    };
+    mkSynproxyType = { finalMerge ? lib.id, reqFields ? [], withExtraFields ? false }:
+    let
+      req = x: builtins.elem x reqFields;
+      mkOpt = x: if req x then lib.mkOption else mkNullOption;
+    in submodule' {
+      inherit finalMerge;
+      options = builtins.mapAttrs mkOpt {
+        family = {
+          type = types.family;
+          description = "The table's family";
+        };
+        table = {
+          type = types.tableName;
+          description = "The table's name";
+        };
+        name = {
+          type = lib.types.str;
+          description = "The synproxy's name";
+        };
+      }
+      // (if withExtraFields then builtins.mapAttrs mkOpt {
+        mss = {
+          type = lib.types.int;
+          description = "Maximum segment size announced to clients.";
+        };
+        wscale = {
+          type = lib.types.int;
+          description = "Window scale announced to clients.";
+        };
+        flags = {
+          type = lib.types.either types.synproxyFlag (lib.types.listOf types.synproxyFlag);
+          description = "Optional flags.";
+        };
+        comment = {
+          type = lib.types.str;
+          description = "Optional comment.";
         };
       } else {});
     };
@@ -753,11 +962,11 @@ let
     keyType = mkEnum {
       name = "nftablesKeyType";
       description = "nftables key type";
-      enum = lib.filterAttrs (k: v: v.__info__.isKey or false) nftTypes;
+      enum = lib.filterAttrs (k: v: v.__info__.isKey or true) nftTypes;
     };
-    valType = mkEnum {
-      name = "nftablesValType";
-      description = "nftables val type";
+    type = mkEnum {
+      name = "nftablesType";
+      description = "nftables type";
       enum = nftTypes;
     };
     family = mkEnum {
@@ -795,6 +1004,11 @@ let
       description = "nftables nat flag";
       enum = natFlags;
     };
+    natTypeFlag = mkEnum {
+      name = "nftablesNatTypeFlag";
+      description = "nftables nat type flag";
+      enum = natTypeFlags;
+    };
     logLevel = mkEnum {
       name = "nftablesLogLevel";
       description = "nftables log level";
@@ -803,12 +1017,17 @@ let
     logFlag = mkEnum {
       name = "nftablesLogFlag";
       description = "nftables log flag";
-      enum = logFlags;
+      enum = logFlags';
     };
     queueFlag = mkEnum {
       name = "nftablesQueueFlag";
       description = "nftables queue flag";
       enum = queueFlags;
+    };
+    flowtableOp = mkEnum {
+      name = "nftablesFlowtableOp";
+      description = "nftables flowtable op";
+      enum = flowtableOps;
     };
     tableName = mkName {
       name = "nftablesTableName";
@@ -826,14 +1045,10 @@ let
       name = "nftablesSetName";
       description = "nftables set name";
     };
-    setReference = lib.types.mkOptionType rec {
+    setReference = mkName {
       name = "nftablesSetReference";
       description = "nftables set reference";
-      descriptionClass = "noun";
-      merge = loc: defs: lib.mergeOneOption loc (map (def:
-        if builtins.isString def && lib.hasPrefix "@" def then def
-        else if builtins.isAttrs def && def?name then "@${def.name}"
-        else throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}") defs);
+      addAt = true;
     };
     mapName = mkName {
       name = "nftablesMapName";
@@ -842,6 +1057,11 @@ let
     quotaName = mkName {
       name = "nftablesQuotaName";
       description = "nftables quota name";
+    };
+    flowtableReference = mkName {
+      name = "nftablesFlowtableReference";
+      description = "nftables flowtable reference";
+      addAt = true;
     };
     hook = mkEnum {
       name = "nftablesHook";
@@ -874,7 +1094,7 @@ let
     l3Proto = mkEnum {
       name = "nftablesL3Proto";
       description = "nftables layer 3 protocol";
-      enum = l3protocols;
+      enum = lib.filterAttrs (k: v: v.__info__.isL3 or false) families;
     };
     timeUnit = mkEnum {
       name = "nftablesTimeUnit";
@@ -884,12 +1104,12 @@ let
     byteUnit = mkEnum {
       name = "nftablesByteUnit";
       description = "nftables byte unit";
-      enum = lib.filterAttrs (k: v: !v.__info__?onlyRate) byteUnits;
+      enum = lib.filterAttrs (k: v: !v.__info__?onlyRate) rateUnits;
     };
     rateUnit = mkEnum {
-      name = "nftablesByteUnit";
-      description = "nftables byte unit";
-      enum = byteUnits;
+      name = "nftablesRateUnit";
+      description = "nftables rate unit";
+      enum = rateUnits;
     };
     connectionState = mkEnum {
       name = "nftablesConnectionState";
@@ -904,12 +1124,17 @@ let
     rejectType = mkEnum {
       name = "nftablesRejectType";
       description = "nftables reject type";
-      enum = rejectTypes;
+      enum = rejectTypes';
     };
-    setOperator = mkEnum {
-      name = "nftablesSetOperator";
-      description = "nftables set operator";
-      enum = setOperators;
+    setOperation = mkEnum {
+      name = "nftablesSetOperation";
+      description = "nftables set operation";
+      enum = setOperations;
+    };
+    synproxyFlag = mkEnum {
+      name = "nftablesSynproxyFlag";
+      description = "nftables synproxy flag";
+      enum = synproxyFlags;
     };
     xtType = mkEnum {
       name = "nftablesXtType";
@@ -996,6 +1221,16 @@ let
       description = "nftables tcp option field";
       enum = tcpOptionFields;
     };
+    ipOption = mkEnum {
+      name = "nftablesIpOption";
+      description = "nftables ip option";
+      enum = ipOptions;
+    };
+    ipOptionField = mkEnum {
+      name = "nftablesIpOptionField";
+      description = "nftables ip option field";
+      enum = ipOptionFields;
+    };
     sctpChunk = mkEnum {
       name = "nftablesSctpChunk";
       description = "nftables sctp chunk";
@@ -1011,16 +1246,26 @@ let
       description = "nftables ct expression key";
       enum = ctKeys;
     };
+    ipsecDir = mkEnum {
+      name = "nftablesIpsecDir";
+      description = "nftables ipsec direction";
+      enum = ipsecDirs;
+    };
+    ipsecKey = mkEnum {
+      name = "nftablesIpsecKey";
+      description = "nftables ipsec key";
+      enum = ipsecKeys;
+    };
     tableToDelete = mkTableType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "One of handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ ];
+      reqFields = [ "family" ];
       withHandle = true;
     };
     # anything but delete
-    tableToWhatever = mkTableType { reqFields = [ "name" ]; };
+    tableToWhatever = mkTableType { reqFields = [ "name" "family" ]; };
     chainToAdd = mkChainType {
       finalMerge = x:
         let
@@ -1058,7 +1303,7 @@ let
                   prio = prioInfo.value (x.family or "");
                 })
             else {});
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
       withExtraFields = true;
     };
     chainToDelete = mkChainType {
@@ -1067,37 +1312,37 @@ let
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
     };
     chainToRename = mkChainType {
       withNewName = true;
-      reqFields = [ "table" "name" "newname" ];
+      reqFields = [ "family" "table" "name" "newname" ];
     };
     # anything but add/delete/rename
     chainToWhatever = mkChainType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     ruleToAdd = mkRuleType {
-      reqFields = [ "table" "chain" "expr" ];
+      reqFields = [ "family" "table" "chain" "expr" ];
       withExpr = true;
       withHandle = true;
       withIndex = true;
       withComment = true;
     };
     ruleToReplace = mkRuleType {
-      reqFields = [ "table" "chain" "handle" "expr" ];
+      reqFields = [ "family" "table" "chain" "handle" "expr" ];
       withExpr = true;
       withHandle = true;
       withComment = true;
     };
     # anything but add/replace
     ruleToWhatever = mkRuleType {
-      reqFields = [ "table" "chain" "handle" ];
+      reqFields = [ "family" "table" "chain" "handle" ];
       withHandle = true;
     };
     setToAdd = mkSetType {
       isMap = false;
-      reqFields = [ "table" "name" "type" ];
+      reqFields = [ "family" "table" "name" "type" ];
       withExtraFields = true;
     };
     setToDelete = mkSetType {
@@ -1107,16 +1352,16 @@ let
         else x;
       withHandle = true;
       isMap = false;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
     };
     # anything but add/delete
     setToWhatever = mkSetType {
       isMap = false;
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     mapToAdd = mkSetType {
       isMap = true;
-      reqFields = [ "table" "name" "type" ];
+      reqFields = [ "family" "table" "name" "type" ];
       withExtraFields = true;
     };
     mapToDelete = mkSetType {
@@ -1126,43 +1371,43 @@ let
         else x;
       withHandle = true;
       isMap = true;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
     };
     # anything but add/delete
     mapToWhatever = mkSetType {
       isMap = true;
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     elementToAdd = mkElementType {
-      reqFields = [ "table" "name" "elem" ];
+      reqFields = [ "family" "table" "name" "elem" ];
       withElem = true;
     };
     # anything but add
     elementToWhatever = mkElementType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" "elem" ];
     };
     setElementToAdd = mkElementType {
-      reqFields = [ "table" "name" "elem" ];
+      reqFields = [ "family" "table" "name" "elem" ];
       withElem = true;
       isMap = false;
     };
     # anything but add
     setElementToWhatever = mkElementType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
       isMap = false;
     };
     mapElementToAdd = mkElementType {
-      reqFields = [ "table" "name" "elem" ];
+      reqFields = [ "family" "table" "name" "elem" ];
       withElem = true;
       isMap = true;
     };
     # anything but add
     mapElementToWhatever = mkElementType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
       isMap = true;
     };
     flowtableToAdd = mkFlowtableType {
-      reqFields = [ "table" "name" "hook" "prio" "dev" ];
+      reqFields = [ "family" "table" "name" "hook" "prio" "dev" ];
       withExtraFields = true;
     };
     flowtableToDelete = mkFlowtableType {
@@ -1170,15 +1415,15 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     # anything but add/delete
     flowTableToWhatever = mkFlowtableType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     counterToAdd = mkCounterType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
       withExtraFields = true;
     };
     counterToDelete = mkCounterType {
@@ -1186,14 +1431,14 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     counterToWhatever = mkCounterType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     quotaToAdd = mkQuotaType {
-      reqFields = [ "table" "name" "bytes" "inv" ];
+      reqFields = [ "family" "table" "name" "bytes" "inv" ];
       withExtraFields = true;
     };
     quotaToDelete = mkQuotaType {
@@ -1201,29 +1446,36 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     quotaToWhatever = mkQuotaType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
-    ctHelperToAdd = mkCtHelperType {
-      reqFields = [ "table" "name" "type" "protocol" ];
+    secmarkToAdd = mkSecmarkType {
+      reqFields = [ "family" "table" "name" ];
       withExtraFields = true;
     };
-    ctHelperToDelete = mkCtHelperType {
+    secmarkToDelete = mkSecmarkType {
       finalMerge = x:
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
+    secmarkToWhatever = mkSecmarkType {
+      reqFields = [ "family" "table" "name" ];
+    };
+    ctHelperToAdd = mkCtHelperType {
+      reqFields = [ "family" "table" "name" "type" "protocol" ];
+      withExtraFields = true;
+    };
     ctHelperToWhatever = mkCtHelperType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     limitToAdd = mkLimitType {
-      reqFields = [ "table" "name" "type" "rate" ];
+      reqFields = [ "family" "table" "name" "type" "rate" ];
       withExtraFields = true;
     };
     limitToDelete = mkLimitType {
@@ -1231,14 +1483,14 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     limitToWhatever = mkLimitType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     ctTimeoutToAdd = mkCtTimeoutType {
-      reqFields = [ "table" "name" "type" "protocol" "state" "value" ];
+      reqFields = [ "family" "table" "name" "type" "protocol" "state" "value" ];
       withExtraFields = true;
     };
     ctTimeoutToDelete = mkCtTimeoutType {
@@ -1246,14 +1498,14 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     ctTimeoutToWhatever = mkCtTimeoutType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
     };
     ctExpectationToAdd = mkCtExpectationType {
-      reqFields = [ "table" "name" "protocol" "dport" "timeout" "size" ];
+      reqFields = [ "family" "table" "name" "protocol" "dport" "timeout" "size" ];
       withExtraFields = true;
     };
     ctExpectationToDelete = mkCtExpectationType {
@@ -1261,11 +1513,38 @@ let
         if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
         else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
-      reqFields = [ "table" ];
+      reqFields = [ "family" "table" ];
       withHandle = true;
     };
     ctExpectationToWhatever = mkCtExpectationType {
-      reqFields = [ "table" "name" ];
+      reqFields = [ "family" "table" "name" ];
+    };
+    synproxyToAdd = mkSynproxyType {
+      reqFields = [ "family" "table" "name" "mss" "wscale" ];
+      withExtraFields = true;
+    };
+    synproxyToDelete = mkSynproxyType {
+      finalMerge = x:
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        else x;
+      reqFields = [ "family" "table" ];
+      withHandle = true;
+    };
+    synproxyToWhatever = mkSynproxyType {
+      reqFields = [ "family" "table" "name" ];
+    };
+    metainfoCommand = submodule' {
+      options.version = mkNullOption {
+        type = lib.types.str;
+      };
+      options.release_name = mkNullOption {
+        type = lib.types.str;
+      };
+      options.json_schema_version = lib.mkOption {
+        type = lib.types.int;
+        default = 1;
+      };
     };
     addCommand = oneOf {
       name = "nftablesAddCommand";
@@ -1283,10 +1562,12 @@ let
         flowtable = types.flowtableToAdd;
         counter = types.counterToAdd;
         quota = types.quotaToAdd;
+        secmark = types.secmarkToAdd;
         "ct helper" = types.ctHelperToAdd;
         limit = types.limitToAdd;
         "ct timeout" = types.ctTimeoutToAdd;
         "ct expectation" = types.ctExpectationToAdd;
+        # synproxy = types.synproxyToAdd;
       };
     };
     replaceCommand = lib.types.submodule {
@@ -1313,10 +1594,12 @@ let
         flowtable = types.flowtableToAdd;
         counter = types.counterToAdd;
         quota = types.quotaToAdd;
+        secmark = types.secmarkToAdd;
         "ct helper" = types.ctHelperToAdd;
         limit = types.limitToAdd;
         "ct timeout" = types.ctTimeoutToAdd;
         "ct expectation" = types.ctExpectationToAdd;
+        # synproxy = types.synproxyToAdd;
       };
     };
     insertCommand = lib.types.submodule {
@@ -1343,10 +1626,12 @@ let
         flowtable = types.flowtableToDelete;
         counter = types.counterToDelete;
         quota = types.quotaToDelete;
-        "ct helper" = types.ctHelperToDelete;
+        secmark = types.secmarkToDelete;
+        "ct helper" = types.ctHelperToWhatever;
         limit = types.limitToDelete;
         "ct timeout" = types.ctTimeoutToDelete;
         "ct expectation" = types.ctExpectationToDelete;
+        # synproxy = types.synproxyToWhatever;
       };
     };
     null = lib.mkOptionType {
@@ -1375,6 +1660,8 @@ let
         counters = types.null;
         quota = types.quotaToWhatever;
         quotas = types.null;
+        secmark = types.secmarkToWhatever;
+        secmarks = types.null;
         "ct helper" = types.ctHelperToWhatever;
         "ct helpers" = types.null;
         limit = types.limitToWhatever;
@@ -1386,7 +1673,10 @@ let
         flowtables = types.null;
         "ct timeout" = types.ctTimeoutToWhatever;
         "ct timeouts" = types.null;
-        "ct expectation" = lib.types.either types.null types.ctExpectationToWhatever;
+        "ct expectation" = lib.types.nullOr types.ctExpectationToWhatever;
+        "ct expectations" = types.null;
+        # synproxy = types.synproxyToWhatever;
+        # synproxys = types.synproxyToAdd;
       };
     };
     resetCommand = oneOf {
@@ -1434,6 +1724,10 @@ let
         inherit (v) type;
         description = "${k} command.\n\n${v.description}";
       })) {
+        metainfo = {
+          type = types.metainfoCommand;
+          description = "Specify ruleset metainfo.";
+        };
         add = {
           type = types.addCommand;
           description = "Add a new ruleset element to the kernel.";
@@ -1489,7 +1783,10 @@ let
       options.target = lib.mkOption { type = types.chainName; description = "goto target"; };
     };
     gotoExpression = types.gotoStatement;
-    matchStatement = lib.types.submodule {
+    matchStatement = submodule' {
+      finalMerge = { left, right, ... } @ ret:
+        assert lib.assertMsg ((isValidExpr 0 left) && (isValidExpr CTX_F_RHS right)) "Match statements' expressions are invalid in this context"; ret;
+      skipNulls = false;
       options.left = lib.mkOption { type = types.expression; description = "Left hand side of this match."; };
       options.right = lib.mkOption { type = types.expression; description = "Right hand side of this match."; };
       options.op = lib.mkOption { type = types.operator; description = "Operator indicating the type of comparison."; };
@@ -1505,9 +1802,14 @@ let
       };
     };
     mangleStatement = submodule' {
-      finalMerge = x:
-        if x.key?exthdr || x.key?payload || x.key?meta || x.key?ct || x.key?"ct helper" then x
+      finalMerge = { key, value }@ret:
+        if key?exthdr || key?payload || key?meta || key?ct || key?"ct helper" then
+          assert lib.assertMsg
+            (isValidExpr CTX_F_MANGLE key && isValidExpr CTX_F_STMT value)
+            "Mangle statements' expressions are invalid in this context";
+          ret
         else throw ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
+
       options.key = lib.mkOption {
         type = types.expression;
         description = lib.mdDoc "The packet data to be changed, given as an **exthdr**, **payload**, **meta**, **ct** or **ct helper** expression.";
@@ -1576,10 +1878,12 @@ let
     # TODO actually check
     ipAddr = lib.types.strMatching (x: true);
     fwdStatement = submodule' {
-      finalMerge = x:
-        if (x?family && !x?addr) || (x?addr && !x?family)
+      finalMerge = { dev, ... } @ ret:
+        if (ret?family && !ret?addr) || (ret?addr && !ret?family)
         then throw "If at least one of `addr` or `family` is given, both must be present."
-        else x;
+        else assert lib.assertMsg
+          (isValidExpr CTX_F_STMT dev && (!ret?addr || isValidExpr CTX_F_STMT ret.addr))
+          "Fwd statement's expressions are invalid in this context"; ret;
       options.dev = lib.mkOption {
         type = types.expression;
         description = "Interface to forward the packet on.";
@@ -1589,16 +1893,17 @@ let
         description = lib.mdDoc "Family of **addr**.";
       };
       options.addr = mkNullOption {
-        type = types.ipAddr;
+        type = types.expression;
         description = "IP(v6) address to forward the packet to.";
       };
     };
     dupStatement = submodule' {
-      finalMerge = x:
-        if !x?addr && !x?dev
-        then throw "At least one of `addr` or `dev` must be specified."
-        else x;
-      options.addr = mkNullOption {
+      finalMerge = ret:
+        assert lib.assertMsg
+          (isValidExpr CTX_F_STMT ret.addr && (!ret?dev || isValidExpr CTX_F_STMT ret.dev))
+          "Dup statement's expressions are invalid in this context";
+        ret;
+      options.addr = lib.mkOption {
         type = types.expression;
         description = "Address to duplicate packet to.";
       };
@@ -1608,6 +1913,11 @@ let
       };
     };
     snatStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          ((!ret?addr || isValidExpr CTX_F_STMT ret.addr) && (!ret?port || isValidExpr CTX_F_STMT ret.port))
+          "Nat statement's expressions are invalid in this context";
+        ret;
       options.addr = mkNullOption {
         type = types.expression;
         description = "Address to translate to.";
@@ -1617,29 +1927,47 @@ let
         description = "Family of addr, either ip or ip6. Required in inet table family.";
       };
       options.port = mkNullOption {
-        type = lib.types.int;
+        type = types.expression;
         description = "Port to translate to.";
       };
-      options.flags = lib.mkOption {
-        type = lib.types.listOf types.natFlag;
+      options.flags = mkNullOption {
+        type = lib.types.either types.natFlag (lib.types.listOf types.natFlag);
         description = "Flag(s).";
-        default = [ ];
+      };
+      options.type_flags = mkNullOption {
+        type = lib.types.either types.natTypeFlag (lib.types.listOf types.natTypeFlag);
+        description = "Type flag(s).";
       };
     };
     dnatStatement = types.snatStatement;
     masqueradeStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          (!ret?port || isValidExpr CTX_F_STMT ret.port)
+          "Nat statement's expressions are invalid in this context";
+        ret;
       options.port = mkNullOption {
         type = lib.types.int;
         description = "Port to translate to.";
       };
       options.flags = mkNullOption {
-        type = lib.types.listOf types.natFlag;
+        type = lib.types.either types.natFlag (lib.types.listOf types.natFlag);
         description = "Flag(s).";
+      };
+      options.type_flags = mkNullOption {
+        type = lib.types.either types.natTypeFlag (lib.types.listOf types.natTypeFlag);
+        description = "Type flag(s).";
       };
     };
     redirectStatement = types.masqueradeStatement;
     rejectStatement = submodule' {
-      finalMerge = x: if x.expr or null != null && x.type or null == "tcp reset" then throw "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`" else x;
+      finalMerge = ret:
+        if ret.expr or null != null && ret.type or null == "tcp reset"
+        then throw "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`"
+        else assert lib.assertMsg
+          (!ret?expr || isImmediateExpr ret.expr)
+          "Reject statement's expression is invalid in this context";
+        ret;
       options.type = mkNullOption {
         type = types.rejectTypes;
         description = lib.mdDoc ''Type of reject, either **"tcp reset"**, **"icmpx"**, **"icmp"** or **"icmpv6"**.'';
@@ -1649,10 +1977,15 @@ let
         description = "ICMP code to reject with.";
       };
     };
-    setStatement = lib.types.submodule {
+    setStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          (!ret?elem || isValidExpr CTX_F_SES ret.elem)
+          "Set statement's expression is invalid in this context";
+        ret;
       options.op = lib.mkOption {
-        description = lib.mdDoc ''Operator on set, either **"add"** or **"update"**.'';
-        type = types.setOperator;
+        description = lib.mdDoc ''Operator on set, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
+        type = types.setOperation;
       };
       options.elem = lib.mkOption {
         description = "Set element to add or update.";
@@ -1661,6 +1994,10 @@ let
       options.set = lib.mkOption {
         description = "Set reference.";
         type = types.setReference;
+      };
+      options.stmt = mkNullOption {
+        description = "Undocumented upstream";
+        type = types.statement;
       };
     };
     logStatement = submodule' {
@@ -1685,13 +2022,18 @@ let
         type = types.logLevel;
         defaultText = lib.literalExpression "warn";
       };
-      options.flags = lib.mkOption {
+      options.flags = mkNullOption {
         description = "Log flags.";
-        type = lib.types.listOf types.logFlag;
-        default = [];
+        type = lib.types.either types.logFlag (lib.types.listOf types.logFlag);
+        defaultText = lib.literalExpression [ ];
       };
     };
-    meterStatement = lib.types.submodule {
+    meterStatement = submodule' {
+      finalMerge = { key, ... }@ret:
+        assert lib.assertMsg
+          (isValidExpr CTX_F_SES key)
+          "Meter statement's key expression is invalid in this context";
+        ret;
       options.name = lib.mkOption {
         description = "Meter name.";
         type = lib.types.str;
@@ -1704,15 +2046,25 @@ let
         description = "Meter statement.";
         type = types.statement;
       };
+      options.size = mkNullOption {
+        description = "Meter size.";
+        type = lib.types.int;
+      };
     };
-    queueStatement = lib.types.submodule {
-      options.num = lib.mkOption {
+    queueStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          (!ret?num || isValidExpr CTX_F_STMT ret.num)
+          "Queue statement's num expression is invalid in this context";
+        ret;
+      skipNulls = false;
+      options.num = mkNullOption {
         description = "Queue number.";
         type = types.expression;
       };
-      options.flags = lib.mkOption {
+      options.flags = mkNullOption {
         description = "Queue flags.";
-        type = lib.types.listOf types.queueFlag;
+        type = lib.types.either types.queueFlag (lib.types.listOf types.queueFlag);
       };
     };
     vmapStatement = lib.types.submodule {
@@ -1742,6 +2094,51 @@ let
       };
       options.name = lib.mkOption {
         type = lib.types.str;
+      };
+    };
+    flowStatement = lib.types.submodule {
+      options.op = lib.mkOption {
+        type = types.flowtableOp;
+        default = flowtableOps.add;
+        description = "Undocumented upstream (flowtable operation)";
+      };
+      options.name = lib.mkOption {
+        type = types.flowtableReference;
+        description = "Undocumented upstream (flowtable name prefixed with \"@\")";
+      };
+    };
+    tproxyStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          ((!ret?addr || isValidExpr CTX_F_STMT ret.addr) && (!ret?port || isValidExpr CTX_F_STMT ret.port))
+          "Tproxy statement's expressions are invalid in this context";
+        ret;
+      options.addr = mkNullOption {
+        type = types.expression;
+        description = "Address to proxy to.";
+      };
+      options.family = mkNullOption {
+        type = types.ipFamily;
+        description = "Family of addr, either ip or ip6. Required in inet table family (or not, this is undocumented).";
+      };
+      options.port = mkNullOption {
+        type = types.expression;
+        description = "Port to proxy to.";
+      };
+    };
+    synproxyStatement = submodule' {
+      chk = x: x?mss || x?wscale || x?flags;
+      options.mss = mkNullOption {
+        type = types.int;
+        description = "Maximum segment size announced to clients. This must match the backend.";
+      };
+      options.wscale = mkNullOption {
+        type = types.int;
+        description = "Window scale announced to clients. This must match the backend.";
+      };
+      options.flags = mkNullOption {
+        type = lib.types.either types.synproxyFlag (lib.types.listOf types.synproxyFlag);
+        description = "Optional flags.";
       };
     };
     statement = oneOf {
@@ -1788,7 +2185,7 @@ let
         '';
         };
         counter = {
-          type = types.counterStatement;
+          type = lib.types.nullOr (lib.types.either types.counterStatement (types.expression' { chk = isValidExpr CTX_F_STMT; }));
           description = lib.mdDoc ''
             This object represents a byte/packet counter. In input, no properties are required. If given, they act as initial values for the counter.
 
@@ -1800,7 +2197,7 @@ let
           description = "This changes the packet data or meta info.";
         };
         quota = {
-          type = types.quotaStatement;
+          type = lib.types.either types.quotaStatement (types.expression' { chk = isValidExpr CTX_F_STMT; });
           description = "The first form creates an anonymous quota which lives in the rule it appears in. The second form specifies a reference to a named quota object.";
         };
         limit = {
@@ -1849,7 +2246,7 @@ let
           description = "Log the packet.";
         };
         "ct helper" = {
-          type = types.expression;
+          type = types.expression' { chk = isValidExpr CTX_F_STMT; };
           description = "Enable the specified conntrack helper for this packet.";
         };
         meter = {
@@ -1869,11 +2266,11 @@ let
           description = "Limit the number of connections using conntrack.";
         };
         "ct timeout" = {
-          type = types.expression;
+          type = types.expression' { chk = isValidExpr CTX_F_STMT; };
           description = "Assign connection tracking timeout policy.";
         };
         "ct expectation" = {
-          type = types.expression;
+          type = types.expression' { chk = isValidExpr CTX_F_STMT; };
           description = "Assign connection tracking expectation.";
         };
         xt = {
@@ -1885,6 +2282,26 @@ let
 
             **BEWARE:** nftables won’t restore these statements.
           '';
+        };
+        flow = {
+          type = types.flowStatement;
+          description = "A flow statement allows us to select what flows you want to accelerate forwarding through layer 3 network stack bypass. You have to specify the flowtable name where you want to offload this flow.";
+        };
+        tproxy = {
+          type = types.tproxyStatement;
+          description = "Tproxy redirects the packet to a local socket without changing the packet header in any way. If any of the arguments is missing the data of the incoming packet is used as parameter. Tproxy matching requires another rule that ensures the presence of transport protocol header is specified.";
+        };
+        synproxy = {
+          type = lib.types.nullOr (lib.types.either types.synproxyStatement (types.expression' { chk = isValidExpr CTX_F_STMT; }));
+          description = "This statement will process TCP three-way-handshake parallel in netfilter context to protect either local or backend system. This statement requires connection tracking because sequence numbers need to be translated.";
+        };
+        reset = {
+          type = types.expression' { chk = isValidExpr 0; };
+          description = "Undocumented upstream (set this to a tcp option expr to reset it)";
+        };
+        secmark = {
+          type = types.expression' { chk = isValidExpr CTX_F_STMT; };
+          description = "Undocumented upstream";
         };
       };
     };
@@ -1933,7 +2350,7 @@ let
         type = lib.types.int;
       };
     };
-    fieldPayloadExpression = submodule' {
+    namedPayloadExpression = submodule' {
       finalMerge = { protocol, field }@ret: let
         inherit (payloadProtocols.${protocol}.__info__) fields;
       in if laxEnums || builtins.elem field fields then ret else throw "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " fields}";
@@ -1949,12 +2366,19 @@ let
     payloadExpression = oneOf {
       name = "nftablesPayloadExpression";
       description = "nftables payload expression";
-      types = [ types.rawPayloadExpression types.fieldPayloadExpression ];
+      types = [ types.rawPayloadExpression types.namedPayloadExpression ];
     };
     exthdrExpression = submodule' {
       finalMerge = { name, ... }@ret: let
         inherit (exthdrs.${name}.__info__) fields;
-      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      in
+      if laxEnums || !ret?field || builtins.elem ret.field fields
+      then
+        (if ret?field && ret?offset then throw "Only one of field and offset of exthdr may be true"
+        else if !ret?offset && ret.name == "rt0" then throw "Must have offset specified with exthdr rt0"
+        else if ret?offset && ret.name != "rt0" then throw "Must not have offset specified with any exthdr other than rt0"
+        else ret)
+      else throw "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
       options.name = lib.mkOption {
         description = "IPv6 extension header name.";
         type = types.exthdr;
@@ -1968,7 +2392,22 @@ let
         type = lib.types.int;
       };
     };
-    tcpOptionExpression = submodule' {
+    # undocumented
+    rawTcpOptionExpression = lib.types.submodule {
+      options.base = lib.mkOption {
+        description = "TCP option kind (numeric).";
+        type = lib.types.int;
+      };
+      options.offset = lib.mkOption {
+        description = "Data byte offset in TCP option.";
+        type = lib.types.int;
+      };
+      options.len = lib.mkOption {
+        description = "Data byte length in TCP option.";
+        type = lib.types.int;
+      };
+    };
+    namedTcpOptionExpression = submodule' {
       finalMerge = { name, ... }@ret: let
         inherit (tcpOptions.${name}.__info__) fields;
       in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
@@ -1979,6 +2418,24 @@ let
       options.field = mkNullOption {
         description = lib.mdDoc "TCP option header field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
         type = types.tcpOptionField;
+      };
+    };
+    tcpOptionExpression = oneOf {
+      name = "nftablesTcpOptionExpression";
+      description = "nftables tcp option expression";
+      types = [ types.rawTcpOptionExpression types.namedTcpOptionExpression ];
+    };
+    ipOptionExpression = submodule' {
+      finalMerge = { name, ... }@ret: let
+        inherit (ipOptions.${name}.__info__) fields;
+      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "IP option ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      options.name = lib.mkOption {
+        description = "IP option header name.";
+        type = types.ipOption;
+      };
+      options.field = mkNullOption {
+        description = lib.mdDoc "IP option header field. If this property is not given, the expression is to be used as an IP option existence check in a **match** statement with a boolean on the right hand side.";
+        type = types.ipOptionField;
       };
     };
     sctpChunkExpression = submodule' {
@@ -2015,12 +2472,13 @@ let
       finalMerge = { key, ... }@ret: let
         info = (ctKeys.${key} or {}).__info__ or {};
         dir = info.dir or null;
-        family = info.family or null;
+        # family = info.family or null;
       in
         if dir == true && !ret?dir then throw "You must provide a direction for CT key ${key}."
         else if dir == false && ret?dir then throw "You must not provide a direction for CT key ${key}."
-        else if family == true && !ret?family then throw "You must provide an IP family for CT key ${key}."
-        else if family == false && ret?family then throw "You must not provide an IP family for CT key ${key}."
+        # else if family == true && !ret?family then throw "You must provide an IP family for CT key ${key}."
+        # else if family == false && ret?family then throw "You must not provide an IP family for CT key ${key}."
+        else if ret?family then throw "Look, I know that you might expect that ct expressions have a property \"family\" - I wouldn't blame you, given that the official docs explain what it does... but actually inside the code it has absolutely no effect. Instead, you have to do this - specify \"ip saddr\" or \"ip6 saddr\" instead of \"saddr\", same for \"daddr\"."
         else ret;
       options.key = lib.mkOption {
         description = "CT key";
@@ -2033,6 +2491,31 @@ let
       options.dir = mkNullOption {
         description = lib.mdDoc "Some CT keys do not support a direction. In this case, **dir** must not be given.";
         type = types.ctDir;
+      };
+    };
+    ipsecExpression = submodule' {
+      finalMerge = { key, ... }@ret: let
+        info = (ctKeys.${key} or {}).__info__ or {};
+        needsFamily = info.needsFamily or false;
+      in
+        if needsFamily && !ret?family then throw "You must provide a family for IPSec key ${key}"
+        else if (ret.spnum or 0) > 255 then throw "Max spnum allowed is 255"
+        else ret;
+      options.key = lib.mkOption {
+        description = "Undocumented upstream";
+        type = types.ipsecKey;
+      };
+      options.family = mkNullOption {
+        description = "IP family.";
+        type = types.ipFamily;
+      };
+      options.dir = mkNullOption {
+        description = "Undocumented upstream";
+        type = types.ipsecDir;
+      };
+      options.spnum = mkNullOption {
+        description = "Undocumented upstream";
+        type = lib.types.int;
       };
     };
     numgenExpression = submodule' {
@@ -2082,13 +2565,26 @@ let
       };
     };
     fibExpression = submodule' {
+      finalMerge = fib:
+        let
+          flags = lib.toList fib.flags;
+          saddr = builtins.elem "saddr" flags;
+          daddr = builtins.elem "daddr" flags;
+          iif = builtins.elem "iif" flags;
+          oif = builtins.elem "oif" flags;
+        in
+          if saddr && daddr then throw "Only one flag out of saddr/daddr may be set in fib"
+          else if !saddr && !daddr then throw "One flag out of saddr/daddr must be set in fib"
+          else if iif && oif then throw "At most one one flag out of iif/oif may be set in fib"
+          else fib;
+      skipNulls = false;
       options.result = lib.mkOption {
         description = "Fib expression type.";
         type = types.fibResult;
       };
-      options.flags = mkNullOption {
+      options.flags = lib.mkOption {
         description = "Fib expression type.";
-        type = lib.types.listOf types.fibFlag;
+        type = lib.types.either types.fibFlag (lib.types.listOf types.fibFlag);
       };
     };
     binOpExpression = lib.types.either (types.listOfSize2 types.expression) (submodule' {
@@ -2108,11 +2604,11 @@ let
         type = types.expression;
       };
       options.timeout = mkNullOption {
-        description = lib.mdDoc "Timeout value for sets/maps with flag **timeout**.";
+        description = lib.mdDoc "Timeout value for sets/maps with flag **timeout** (in seconds).";
         type = lib.types.int;
       };
       options.expires = mkNullOption {
-        description = "The time until given element expires, useful for ruleset replication only.";
+        description = "The time until given element expires (in seconds), useful for ruleset replication only.";
         type = lib.types.int;
       };
       options.comment = mkNullOption {
@@ -2144,7 +2640,7 @@ let
         type = types.expression;
       };
     };
-    expression = oneOf {
+    expression' = attrs: oneOf ({
       name = "nftablesExpression";
       description = "nftables expression";
       types = [ lib.types.str lib.types.int lib.types.bool (lib.types.listOf types.expression) types.dslExprHackType ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -2198,6 +2694,10 @@ let
 
             If the **field** property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.
           '';
+        };
+        "ip option" = {
+          type = types.ipOptionExpression;
+          description = "This isn't documented upstream";
         };
         "sctp chunk" = {
           type = types.sctpChunkExpression;
@@ -2303,35 +2803,86 @@ let
           type = types.osfExpression;
           description = "";
         };
+        ipsec = {
+          type = types.ipsecExpression;
+          description = "Undocumented upstream";
+        };
       });
-    };
+    } // attrs);
+    expression = types.expression' {};
   };
-  wildcard = "\\*";
+  wildcard = "*";
   setReference = s: "@${s}";
   nftTypes = mkEnum "nftTypes" {
-    ipv4_addr.isKey = true;
-    ipv6_addr.isKey = true;
-    ether_addr.isKey = true;
-    inet_proto.isKey = true;
-    inet_service.isKey = true;
-    mark.isKey = true;
-    counter = {};
-    quota = {};
+    invalid = { };
+    verdict = { };
+    nf_proto = { };
+    bitmask = { };
+    integer = { };
+    string = { };
+    ll_addr = { };
+    ipv4_addr = { };
+    ipv6_addr = { };
+    ether_addr = { };
+    ether_type = { };
+    arp_op = { };
+    inet_proto = { };
+    inet_service = { };
+    icmp_type = { };
+    tcp_flag = { };
+    dccp_pkttype = { };
+    mh_type = { };
+    time = { };
+    mark = { };
+    iface_index = { };
+    iface_type = { };
+    realm = { };
+    classid = { };
+    uid = { };
+    gid = { };
+    ct_state = { };
+    ct_dir = { };
+    ct_status = { };
+    icmpv6_type = { };
+    pkt_type = { };
+    icmp_code = { };
+    icmpv6_code = { };
+    icmpx_code = { };
+    devgroup = { };
+    dscp = { };
+    ecn = { };
+    fib_addtype = { };
+    boolean = { };
+    ifname = { };
+    igmp_type = { };
+    time = { };
+    hour = { };
+    day = { };
+    cgroupsv2 = { };
+    # special cases: those types are hardcoded in parser_json.c/string_to_nft_object and can only be set values
+    # the reason is they are "objects" rather than "built-in types"
+    counter.isKey = false;
+    quota.isKey = false;
+    limit.isKey = false;
+    secmark.isKey = false;
   };
   xtTypes = mkEnum "xtTypes" {
     match = {};
     target = {};
     watcher = {};
   };
+  # src/proto.c, proto_base_tokens
   payloadBases = mkEnum "payloadBases" {
-    ll = {};
-    nh = {};
-    th = {};
+    ll = {}; # link layer
+    nh = {}; # network layer
+    th = {}; # transport layer
+    ih = {}; # inner/payload data
   };
   rtKeys = mkEnum "rtKeys" {
     classid = {};
     nexthop = {};
     mtu = {};
+    ipsec = {};
   };
   ctDirs = mkEnum "ctDirs" {
     original = {};
@@ -2358,57 +2909,97 @@ let
   };
   socketKeys = mkEnum "socketKeys" {
     transparent = {};
+    mark = {};
+    wildcard = {};
   };
   osfKeys = mkEnum "osfKeys" {
     name = {};
+    # undocumented
+    version = {};
   };
   osfTtl = mkEnum "osfTtl" {
     loose = {};
     skip = {};
   };
-  metaKeys = mkEnum "metaKeys" {
-    length = {};
-    protocol = {};
-    priority = {};
-    random = {};
+  # if type info is needed, it can be parsed from src/meta.c (const struct meta_template meta_templates[])
+  metaKeys = let self = mkEnum "metaKeys" {
+    # "unqualified" means "don't have to write `meta` before the meta key"
+    # but it can mean different things
+    # first, the parser is quite lax:
+    # length | nfproto | l4proto | protocol | priority are qualified
+    # mark | iif | iifname | iiftype | oif | oifname | oiftype | skuid | skgid | nftrace | rtclassid | ibrname | obrname | pkttype | cpu | iifgroup | oifgroup | cgroup | random | ipsec | iifkind | oifkind | time | hour | day are unqualified
+    # however!
+    # when dumping the output back to the user, a different definition of "unqualified" is used.
+    # in that case, only iif/oif/iifname/oifname/iifgroup/oifgroup are considered unqualified
+    # with that in mind:
+    # the keys that MUST be preceded by "meta " in *input* are marked as qualified
+    # the keys that MUST NOT be preceded by "meta " in *output* are marked as unqualified
+    # the rest dont have anything set, which means they are unqualified in input, but qualified in output
+    length = { qualified = true; };
+    protocol = { qualified = true; };
+    nfproto = {};
+    l4proto = {};
+    priority = { qualified = true; };
     mark = {};
-    iif = {};
-    iifname = {};
+    iif = { unqualified = true; };
+    iifname = { unqualified = true; };
     iiftype = {};
-    oif = {};
-    oifname = {};
+    oif = { unqualified = true; };
+    oifname = { unqualified = true; };
     oiftype = {};
     skuid = {};
     skgid = {};
     nftrace = {};
     rtclassid = {};
-    ibriport = {};
-    obriport = {};
-    ibridgename = {};
-    obridgename = {};
+    ibrname = {};
+    obrname = {};
     pkttype = {};
     cpu = {};
-    iifgroup = {};
-    oifgroup = {};
+    iifgroup = { unqualified = true; };
+    oifgroup = { unqualified = true; };
     cgroup = {};
-    nfproto = {};
-    l4proto = {};
-    secpath = {};
+    random = { qualified = true; };
+    ipsec = {};
+    iifkind = {};
+    oifkind = {};
+    ibrpvid = {}; # iifpvid
+    ibrvproto = {}; # iifvproto
+    time = {};
+    day = {};
+    hour = {};
+    secmark = { qualified = true; };
+    sdif = {};
+    sdifname = {};
+    broute = {};
+  }; in self // {
+    # technically those aliases are supported by nftables code, but if they are aliases anyway
+    # i might as well make them proper aliases in nix code as well
+    ibriport = self.iifname;
+    obriport = self.oifname;
+    secpath = self.ipsec;
+    # the following two aren't actually supported by the code but instead documented by the wrong names...
+    ibridgename = self.ibrname;
+    obridgename = self.obrname;
   };
+  # static int parse_family(const char *name, uint32_t *family)
   families = mkEnum "families" {
     ip = {
       hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
       isIp = true;
+      isL3 = true;
     };
     ip6 = {
       hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
       isIp = true;
+      isL3 = true;
     };
     inet = {
       hooks = [ "prerouting" "input" "forward" "output" "postrouting" "ingress" ];
+      isL3 = true;
     };
     arp = {
       hooks = [ "input" "output" ];
+      isL3 = true;
     };
     bridge = {
       # not sure if ingress is supported here, docs dont specify it, whatever
@@ -2436,6 +3027,12 @@ let
     random = {};
     fully-random = {};
     persistent = {};
+    netmap = {};
+  };
+  natTypeFlags = mkEnum "natTypeFlags" {
+    interval = {};
+    prefix = {};
+    concat = {};
   };
   queueFlags = mkEnum "queueFlags" {
     bypass = {};
@@ -2452,13 +3049,18 @@ let
     debug = {};
     audit = {};
   };
-  logFlags = mkEnum "logFlags" {
+  logFlags' = mkEnum "logFlags" {
     "tcp sequence" = {};
     "tcp options" = {};
     "ip options" = {};
     skuid = {};
     ether = {};
     all = {};
+  };
+  logFlags = logFlags' // {
+    tcpSequence = logFlags'."tcp sequence";
+    tcpOptions = logFlags'."tcp options";
+    ipOptions = logFlags'."ip options";
   };
   chainTypes = mkEnum "chainTypes" {
     # Standard chain type to use when in doubt.
@@ -2496,12 +3098,6 @@ let
     icmp = {};
     generic = {};
   };
-  l3protocols = mkEnum "l3protocols" {
-    ip = {};
-    ip6 = {};
-    inet = {};
-    arp = {};
-  };
   timeUnits = mkEnum "timeUnits" {
     second = {};
     minute = {};
@@ -2509,21 +3105,29 @@ let
     day = {};
     week = {};
   };
-  byteUnits = mkEnum "byteUnits" {
+  rateUnits = mkEnum "byteUnits" {
     bytes = {};
     kbytes = {};
     mbytes = {};
     packets = { onlyRate = true; };
   };
-  rejectTypes = mkEnum "rejectTypes" {
+  rejectTypes' = mkEnum "rejectTypes" {
     icmpx = {};
     icmp = {};
     icmpv6 = {};
     "tcp reset" = {};
   };
-  setOperators = mkEnum "setOperators" {
+  rejectTypes = rejectTypes' // {
+    tcpReset = rejectTypes'."tcp reset";
+  };
+  setOperations = mkEnum "setOperations" {
     add = {};
     update = {};
+    delete = {};
+  };
+  synproxyFlags = mkEnum "synproxyFlags" {
+    timestamp = { };
+    sack-perm = { };
   };
   payloadProtocols = mkEnum "payloadProtocols" {
     ether.fields = [ "daddr" "saddr" "type" ];
@@ -2533,21 +3137,28 @@ let
     icmp.fields = [ "type" "code" "checksum" "id" "sequence" "gateway" "mtu" ];
     igmp.fields = [ "type" "mrt" "checksum" "group" ];
     ip6.fields = [ "version" "dscp" "ecn" "flowlabel" "length" "nexthdr" "hoplimit" "saddr" "daddr" ];
-    icmpv6.fields = [ "type" "code" "checksum" "parameter-problem" "packet-too-big" "id" "sequence" "max-delay" ];
+    # documentation shows packet-too-big instead of mtu... but in the code and in the internal tests it's clearly mtu...
+    icmpv6.fields = [ "type" "code" "checksum" "parameter-problem" "mtu" "id" "sequence" "max-delay" ];
     tcp.fields = [ "sport" "dport" "sequence" "ackseq" "doff" "reserved" "flags" "window" "checksum" "urgptr" ];
     udp.fields = [ "sport" "dport" "length" "checksum" ];
-    udplite.fields = [ "sport" "dport" "checksum" ];
+    udplite.fields = [ "sport" "dport" "csumcov" "checksum" ];
     sctp.fields = [ "sport" "dport" "vtag" "checksum" ];
     dccp.fields = [ "sport" "dport" "type" ];
     ah.fields = [ "nexthdr" "hdrlength" "reserved" "spi" "sequence" ];
     esp.fields = [ "spi" "sequence" ];
     comp.fields = [ "nexthdr" "flags" "cpi" ];
-    # not sure if "gre ip ..." and "gre ip6 ..." are supported in json scheme
-    gre.fields = [ "flags" "version" "protocol" ];
-    # same here
-    geneve.fields = [ "vni" "flags" ];
-    gretap.fields = [ "vni" "flags" ];
-    vxlan.fields = [ "vni" "flags" ];
+    # this isn't documented anywhere, but yes it works
+    th.fields = [ "sport" "dport" ];
+    # the following protocols encapsulate other protocols
+    # getting encapsulated protos' fields isn't supported in the json syntax, and as such the protocols aren't supported altogether
+    # to add insult to the injury, the docs specify wrong fields... well, it's fine, because the protocols aren't supported anyway
+    #gre.fields = [ "flags" "version" "protocol" ];
+    # code shows vni, type but docs show vni, flags...
+    #geneve.fields = [ "vni" "type" ];
+    # code shows no fields, docs show vni, flags
+    #gretap.fields = [ ];
+    # this is fine, finally something docs agree on
+    #vxlan.fields = [ "vni" "flags" ];
   };
   payloadFields = mkEnum "payloadFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
@@ -2558,11 +3169,15 @@ let
         (builtins.attrValues payloadProtocols))));
   exthdrs = mkEnum "exthdrs" {
     hbh.fields = [ "nexthdr" "hdrlength" ];
+    rt2.fields = [];
+    rt0.fields = [ "reserved" "addr[1]" "addr[2]" ];
+    # i'm beginning to think I shouldn't trust these docs...
+    srh.fields = [ "last-entry" "flags" "tag" "sid[1]" "sid[2]" ];
+    # srh.fields = [ "last-entry" "flags" "tag" "sid" "seg-left" ];
     rt.fields = [ "nexthdr" "hdrlength" "type" "seg-left" ];
-    frag.fields = [ "nexthdr" "frag-off" "more-fragments" "id" ];
+    frag.fields = [ "nexthdr" "reserved" "frag-off" "reserved2" "more-fragments" "id" ];
     dst.fields = [ "nexthdr" "hdrlength" ];
-    mh.fields = [ "nexthdr" "hdrlength" "checksum" "type" ];
-    srh.fields = [ "flags" "tag" "sid" "seg-left" ];
+    mh.fields = [ "nexthdr" "hdrlength" "type" "reserved" "checksum" ];
   };
   exthdrFields = mkEnum "exthdrFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
@@ -2571,7 +3186,9 @@ let
       (map
         (x: x.__info__.fields)
         (builtins.attrValues exthdrs))));
+  # src/tcpopt.c, special case in parser for sack0-sack3
   tcpOptions = mkEnum "tcpOptions" {
+    # additionally, "kind" is listed everywhere in the code... just in case, don't support it here
     eol.fields = [ ];
     nop.fields = [ ];
     maxseg.fields = [ "length" "size" ];
@@ -2583,6 +3200,10 @@ let
     sack2.fields = [ "length" "left" "right" ];
     sack3.fields = [ "length" "left" "right" ];
     timestamp.fields = [ "length" "tsval" "tsecr" ];
+    # undocumented
+    fastopen.fields = [ "length" ];
+    md5sig.fields = [ "length" ];
+    mptcp.fields = [ "length" "subtype" ];
   };
   tcpOptionFields = mkEnum "tcpOptionFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
@@ -2591,6 +3212,20 @@ let
       (map
         (x: x.__info__.fields)
         (builtins.attrValues tcpOptions))));
+  ipOptions = mkEnum "ipOptions" {
+    lsrr.fields = [ "type" "length" "ptr" "addr" ];
+    rr.fields = [ "type" "length" "ptr" "addr" ];
+    ssrr.fields = [ "type" "length" "ptr" "addr" ];
+    ra.fields = [ "type" "length" "value" ];
+  };
+  ipOptionFields = mkEnum "ipOptionFields" (builtins.foldl'
+    (res: field: res // { ${field} = {}; })
+    {}
+    (builtins.concatLists
+      (map
+        (x: x.__info__.fields)
+        (builtins.attrValues ipOptions))));
+  # src/sctp_chunk.c
   sctpChunks = mkEnum "sctpChunks" {
     data.fields = [ "type" "flags" "length" "tsn" "stream" "ssn" "ppid" ];
     init.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
@@ -2630,19 +3265,26 @@ let
     mark = ff;
     expiration = ff;
     helper = ff;
-    label = ff;
-    count = ff;
-    id = ff;
     l3proto = nf;
+    saddr = tt;
+    daddr = tt;
     protocol = nf;
+    proto-src = tf;
+    proto-dst = tf;
+    label = ff;
     bytes = nf;
     packets = nf;
     avgpkt = nf;
     zone = nf;
-    proto-src = tf;
-    proto-dst = tf;
-    saddr = tt;
-    daddr = tt;
+    event = ff; # undocumented
+    "ip saddr" = nf; # undocumented
+    "ip daddr" = nf; # undocumented
+    "ip6 saddr" = nf; # undocumented
+    "ip6 daddr" = nf; # undocumented
+    secmark = ff; # undocumented
+
+    # count = ff; - ? apparently documented but not supported
+    id = ff;
   };
   connectionStates = mkEnum "connectionStates" {
     close.proto = "tcp";
@@ -2688,6 +3330,21 @@ let
     ge = operators'.">=";
     IN = operators'."in";
     in' = operators'."in";
+    implicit = operators'."in";
+  };
+  ipsecDirs = mkEnum "ipsecDirs" {
+    "in" = { };
+    out = { };
+  };
+  flowtableOps = mkEnum "flowOps" {
+    add = { };
+  };
+  ipsecKeys = mkEnum "ipsecKeys" {
+    # basically, family is only actually used in daddr/saddr
+    daddr.needsFamily = true;
+    saddr.needsFamily = true;
+    reqid = { };
+    spi = { };
   };
   priorities = mkEnum "priorities" {
     raw = {
@@ -2733,7 +3390,7 @@ let
     cwr = 128;
   };
   # fib_addrtype
-  fibTypes = builtins.mapAttrs (k: v: k) {
+  fibAddrTypes = builtins.mapAttrs (k: v: k) {
     unspec = 0;
     unicast = 1;
     local = 2;
@@ -2744,7 +3401,7 @@ let
     unreachable = 7;
     prohibit = 8;
   };
-  # icmp_type
+  # icmp_type; for payload
   icmpTypes = builtins.mapAttrs (k: v: k) {
     echo-reply = 0;
     destination-unreachable = 3;
@@ -2762,6 +3419,7 @@ let
     address-mask-request = 17;
     address-mask-reply = 18;
   };
+  # for payload
   icmpv6Types = builtins.mapAttrs (k: v: k) {
     destination-unreachable = 1;
     packet-too-big = 2;
@@ -2783,6 +3441,62 @@ let
     ind-neighbor-advert = 142;
     mld2-listener-report = 143;
   };
+  # for payload
+  igmpTypes = builtins.mapAttrs (k: v: k) {
+    membership-query = 17;
+    membership-report-v1 = 18;
+    membership-report-v2 = 22;
+    membership-report-v3 = 34;
+    leave-group = 23;
+  };
+  # for dccp payload
+  dccpPktTypes = builtins.mapAttrs (k: v: k) {
+    request = 0;
+    response = 1;
+    data = 2;
+    ack = 3;
+    dataack = 4;
+    closereq = 5;
+    close = 6;
+    reset = 7;
+    sync = 8;
+    syncack = 9;
+  };
+  # for ip payload. The nftables type is just called "dscp"
+  dscpTypes = builtins.mapAttrs (k: v: k) {
+    cs0 = 0;
+    cs1 = 8;
+    cs2 = 16;
+    cs3 = 24;
+    cs4 = 32;
+    cs5 = 40;
+    cs6 = 48;
+    cs7 = 56;
+    df = 0;
+    be = 0;
+    lephb = 1;
+    af11 = 10;
+    af12 = 12;
+    af13 = 14;
+    af21 = 18;
+    af22 = 20;
+    af23 = 22;
+    af31 = 26;
+    af32 = 28;
+    af33 = 30;
+    af41 = 34;
+    af42 = 36;
+    af43 = 38;
+    va = 44;
+    ef = 46;
+  };
+  # for ip payload. The nftables type is just called "ecn"
+  ecnTypes = builtins.mapAttrs (k: v: k) {
+    not-ect = 0;
+    ect1 = 1;
+    ect0 = 2;
+    ce = 3;
+  };
   ctStates = builtins.mapAttrs (k: v: k) {
     invalid = 1;
     established = 2;
@@ -2790,11 +3504,249 @@ let
     new = 8;
     untracked = 64;
   };
-  exists = true;
-  missing = false;
+  # mobility header exthdr
+  mhTypes = builtins.mapAttrs (k: v: k) {
+    binding-refresh-request = 0;
+    home-test-init = 1;
+    careof-test-init = 2;
+    home-test = 3;
+    careof-test = 4;
+    binding-update = 5;
+    binding-acknowledgement = 6;
+    binding-error = 7;
+    fast-binding-update = 8;
+    fast-binding-acknowledgement = 9;
+    fast-binding-advertisement = 10;
+    experimental-mobility-header = 11;
+    home-agent-switch-message = 12;
+  };
+  # also known as l3proto
+  nfprotoTypes = builtins.mapAttrs (k: v: k) {
+    ipv4 = 2;
+    ipv6 = 10;
+  };
+  # inet_proto, the type of meta ip protocol/meta ip6 nexthdr/etc
+  inetProtos = builtins.mapAttrs (k: v: k) {
+    hopopt = 0;
+    icmp = 1;
+    igmp = 2;
+    ggp = 3;
+    ipv4 = 4;
+    st = 5;
+    tcp = 6;
+    cbt = 7;
+    egp = 8;
+    igp = 9;
+    bbn-rcc-mon = 10;
+    nvp-ii = 11;
+    pup = 12;
+    emcon = 14;
+    xnet = 15;
+    chaos = 16;
+    udp = 17;
+    mux = 18;
+    dcn-meas = 19;
+    hmp = 20;
+    prm = 21;
+    xns-idp = 22;
+    trunk-1 = 23;
+    trunk-2 = 24;
+    leaf-1 = 25;
+    leaf-2 = 26;
+    rdp = 27;
+    irtp = 28;
+    iso-tp4 = 29;
+    netblt = 30;
+    mfe-nsp = 31;
+    merit-inp = 32;
+    dccp = 33;
+    "3pc" = 34;
+    idpr = 35;
+    xtp = 36;
+    ddp = 37;
+    idpr-cmtp = 38;
+    "tp++" = 39;
+    il = 40;
+    ipv6 = 41;
+    sdrp = 42;
+    ipv6-route = 43;
+    ipv6-frag = 44;
+    idrp = 45;
+    rsvp = 46;
+    gre = 47;
+    dsr = 48;
+    bna = 49;
+    esp = 50;
+    ah = 51;
+    i-nlsp = 52;
+    narp = 54;
+    mobile = 55;
+    tlsp = 56;
+    skip = 57;
+    ipv6-icmp = 58;
+    ipv6-nonxt = 59;
+    ipv6-opts = 60;
+    cftp = 62;
+    sat-expak = 64;
+    kryptolan = 65;
+    rvd = 66;
+    ippc = 67;
+    sat-mon = 69;
+    visa = 70;
+    ipcv = 71;
+    cpnx = 72;
+    cphb = 73;
+    wsn = 74;
+    pvp = 75;
+    br-sat-mon = 76;
+    sun-nd = 77;
+    wb-mon = 78;
+    wb-expak = 79;
+    iso-ip = 80;
+    vmtp = 81;
+    secure-vmtp = 82;
+    vines = 83;
+    iptm = 84;
+    nsfnet-igp = 85;
+    dgp = 86;
+    tcf = 87;
+    eigrp = 88;
+    ospfigp = 89;
+    sprite-rpc = 90;
+    larp = 91;
+    mtp = 92;
+    "ax.25" = 93;
+    ipip = 94;
+    scc-sp = 96;
+    etherip = 97;
+    encap = 98;
+    gmtp = 100;
+    ifmp = 101;
+    pnni = 102;
+    pim = 103;
+    aris = 104;
+    scps = 105;
+    qnx = 106;
+    "a/n" = 107;
+    ipcomp = 108;
+    snp = 109;
+    compaq-peer = 110;
+    ipx-in-ip = 111;
+    vrrp = 112;
+    pgm = 113;
+    l2tp = 115;
+    ddx = 116;
+    iatp = 117;
+    stp = 118;
+    srp = 119;
+    uti = 120;
+    smp = 121;
+    ptp = 123;
+    fire = 125;
+    crtp = 126;
+    crudp = 127;
+    sscopmce = 128;
+    iplt = 129;
+    sps = 130;
+    pipe = 131;
+    sctp = 132;
+    fc = 133;
+    rsvp-e2e-ignore = 134;
+    udplite = 136;
+    mpls-in-ip = 137;
+    manet = 138;
+    hip = 139;
+    shim6 = 140;
+    wesp = 141;
+    rohc = 142;
+    ethernet = 143;
+    aggfrag = 144;
+  };
+  icmpCodes = builtins.mapAttrs (k: v: k) {
+    net-unreachable = 0;
+    host-unreachable = 1;
+    prot-unreachable = 2;
+    port-unreachable = 3;
+    net-prohibited = 9;
+    host-prohibited = 10;
+    admin-prohibited = 13;
+    frag-needed = 4;
+  };
+  icmpv6Codes = builtins.mapAttrs (k: v: k) {
+    no-route = 0;
+    admin-prohibited = 1;
+    addr-unreachable = 3;
+    port-unreachable = 4;
+    policy-fail = 5;
+    reject-route = 6;
+  };
+  icmpxCodes = builtins.mapAttrs (k: v: k) {
+    port-unreachable = 1;
+    admin-prohibited = 3;
+    no-route = 0;
+    host-unreachable = 2;
+  };
+  booleans = {
+    exists = true;
+    missing = false;
+  };
+  exists = booleans.exists;
+  missing = booleans.missing;
+  etherTypes = builtins.mapAttrs (k: v: k) {
+    ip = 8;
+    arp = 1544;
+    ip6 = 56710;
+    "8021q" = 129;
+    "8021ad" = 43144;
+    vlan = 129;
+  };
+  arpOps = builtins.mapAttrs (k: v: k) {
+    request = 256;
+    reply = 512;
+    rrequest = 768;
+    rreply = 1024;
+    inrequest = 2048;
+    inreply = 2304;
+    nak = 2560;
+  };
+  ifaceTypes = builtins.mapAttrs (k: v: k) {
+    ether = 1;
+    ppp = 512;
+    ipip = 768;
+    ipip6 = 769;
+    loopback = 772;
+    sit = 776;
+    ipgre = 778;
+  };
+  # yes, it isn't stati but statuses, english is very inconsistent
+  ctStatuses = builtins.mapAttrs (k: v: k) {
+    expected = 1;
+    seen-reply = 2;
+    assured = 4;
+    confirmed = 8;
+    snat = 16;
+    dnat = 32;
+    dying = 512;
+  };
+  pktTypes = builtins.mapAttrs (k: v: k) {
+    host = 0;
+    unicast = 0;
+    broadcast = 1;
+    multicast = 2;
+    other = 3;
+  };
+  days = builtins.mapAttrs (k: v: k) {
+    Sunday = 0;
+    Monday = 1;
+    Tuesday = 2;
+    Wednesday = 3;
+    Thursday = 4;
+    Friday = 5;
+    Saturday = 6;
+  };
 in rec {
   config.notnft = {
-    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags operators tcpFlags fibTypes exists missing icmpTypes icmpv6Types timeUnits ctStates;
+    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibAddrTypes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags operators tcpFlags  exists missing icmpTypes icmpv6Types timeUnits ctStates igmpTypes dscpTypes ecnTypes mhTypes isValidExpr ipsecDirs ipsecKeys nfprotoTypes inetProtos icmpCodes icmpv6Codes icmpxCodes booleans etherTypes arpOps dccpPktTypes ifaceTypes ctStatuses pktTypes days rateUnits natFlags natTypeFlags rejectTypes setOperations logFlags synproxyFlags;
     dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
   };
   options.notnftConfig.enumMode = lib.mkOption {

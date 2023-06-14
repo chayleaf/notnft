@@ -53,7 +53,7 @@ let
     assert chkAdd x;
     assert chkDelete x;
     assert chkDelete (addAll { handle = 5; } (removeAll [ "name" ] x));
-    assert chkDelete (addAll { handle = 5; } (preserveAll [ "table" ] x));
+    assert chkDelete (addAll { handle = 5; } (preserveAll [ "table" "family" "chain" ] x));
     assert fails (chkDelete (removeAll [ "name" ] x));
     fails (chkDelete (removeAll [ "name" ] x));
 
@@ -96,9 +96,10 @@ assert fails (chkExpr { payload = { protocol = "tcp"; field = "basketball"; }; }
 assert fails (chkExpr { payload = { protocol = flake.payloadProtocols.udp; field = flake.payloadFields.vtag; }; });
 # exthdr expr
 assert chkExpr { exthdr = { name = "hbh"; }; };
-assert chkExprJson { exthdr = { name = flake.exthdrs.hbh; offset = 5; }; };
-assert chkExprJson { exthdr = { name = flake.exthdrs.srh; field = flake.exthdrFields.sid; }; };
-assert fails (chkExprJson { exthdr = { name = flake.exthdrs.hbh; field = flake.exthdrFields.sid; }; });
+assert chkExprJson { exthdr = { name = flake.exthdrs.rt0; offset = 5; }; };
+assert chkExprJson { exthdr = { name = flake.exthdrs.srh; field = flake.exthdrFields.tag; }; };
+assert fails (chkExprJson { exthdr = { name = flake.exthdrs.hbh; offset = 5; }; });
+assert fails (chkExprJson { exthdr = { name = flake.exthdrs.hbh; field = flake.exthdrFields.tag; }; });
 # tcp option expr
 assert chkExpr { "tcp option" = { name = "eol"; }; };
 assert chkExprJson { "tcp option" = { name = flake.tcpOptions.maxseg; field = flake.tcpOptionFields.size; }; };
@@ -122,17 +123,13 @@ assert fails (chkExpr { rt = { }; });
 # ct expr
 assert chkExpr { ct = { key = "state"; }; };
 assert chkExprJson { ct = { key = flake.ctKeys.mark; }; };
-assert chkExprJson { ct = { key = flake.ctKeys.saddr; family = flake.families.ip6; dir = flake.ctDirs.reply; }; };
+assert chkExprJson { ct = { key = flake.ctKeys."ip6 saddr"; dir = flake.ctDirs.reply; }; };
 assert chkExprJson { ct = { key = flake.ctKeys.proto-src; dir = flake.ctDirs.reply; }; };
 assert chkExprJson { ct = { key = flake.ctKeys.l3proto; }; };
 assert chkExprJson { ct = { key = flake.ctKeys.l3proto; dir = flake.ctDirs.original; }; };
-assert fails (chkExprJson { ct = { key = flake.ctKeys.mark; family = flake.families.ip; }; });
 assert fails (chkExprJson { ct = { key = flake.ctKeys.mark; dir = flake.ctDirs.original; }; });
 assert fails (chkExprJson { ct = { key = flake.ctKeys.saddr; }; });
-assert fails (chkExprJson { ct = { key = flake.ctKeys.saddr; family = flake.families.ip6; }; });
 assert fails (chkExprJson { ct = { key = flake.ctKeys.proto-src; }; });
-assert fails (chkExprJson { ct = { key = flake.ctKeys.proto-src; family = flake.families.ip; dir = flake.ctDirs.original; }; });
-assert fails (chkExprJson { ct = { key = flake.ctKeys.l3proto; dir = flake.ctDirs.original; family = flake.families.ip; }; });
 # numgen expr
 assert chkExpr { numgen = { mode = "random"; mod = 5; }; };
 assert chkExprJson { numgen = { mode = flake.ngModes.inc; mod = 5; offset = 5; }; };
@@ -147,10 +144,13 @@ assert chkExpr { jhash = { mod = 5; expr.symhash.mod = 5; offset = 10; }; };
 assert chkExpr { jhash = { mod = 5; expr.symhash.mod = 5; }; };
 assert fails (chkExpr { jhash = { mod = 5; expr.aounfeuio = 5; seed = 6; offset = 10; }; });
 # fib expr
-assert chkExpr { fib = { result = "oif"; }; };
-assert chkExpr { fib = { result = "oif"; flags = [ "saddr" ]; }; };
-assert chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.fibFlags; [ saddr daddr mark iif oif ]; }; };
+assert chkExpr { fib = { result = "oif"; flags = [ "saddr" "iif" ]; }; };
+assert chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.fibFlags; [ saddr mark iif ]; }; };
+assert fails (chkExpr { fib = { result = "oif"; flags = [ ]; }; });
+assert fails (chkExpr { fib = { result = "oif"; flags = [ "iif" ]; }; });
 assert fails (chkExpr { fib = { result = "oif"; flags = [ "saddrr" ]; }; });
+assert fails (chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.fibFlags; [ saddr daddr mark iif ]; }; });
+assert fails (chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.fibFlags; [ saddr mark iif oif ]; }; });
 # |/^/&/<</>> exprs
 assert chkExpr { "|" = [ 5 5 ]; };
 assert chkExprEq { "|" = [ 5 5 ]; } { "|" = { left = 5; right = 5; }; };
@@ -310,11 +310,10 @@ assert chkAdd { flowtable = {
 # INSERT RULE
 
 
-# test config (manually converted from my old router)
-# but it isn't complete, i decided i need a dsl
-assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; with tcpFlags; ruleset {
+### test config (manually converted from my old router)
+assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; ruleset {
   filter = table { family = families.netdev; } {
-    ingress_common = with tcpFlags; chain {}
+    ingress_common = with tcpFlags; chain 
       [(is.eq (op."&" tcp.flags (fin + syn)) (fin + syn)) drop]
       [(is.eq (op."&" tcp.flags (op."&" syn rst)) (op."&" syn rst)) drop]
       [(is.eq (op."&" tcp.flags (op."&" [ fin syn rst psh ack urg ])) 0) drop]
@@ -327,7 +326,7 @@ assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; with t
     ingress_lan = chain { type = chainTypes.filter; hook = hooks.ingress; dev = "lan0"; prio = -500; policy = chainPolicies.accept; }
       [(jump "ingress_common")];
 
-    ingress_wan = with fibTypes; chain { type = chainTypes.filter; hook = hooks.ingress; dev = "wan0"; prio = -500; policy = chainPolicies.drop; }
+    ingress_wan = with fibAddrTypes; chain { type = chainTypes.filter; hook = hooks.ingress; dev = "wan0"; prio = -500; policy = chainPolicies.drop; }
       [(jump "ingress_common")]
       [(is.ne (fib (with fibFlags; [ daddr iif ]) fibResults.type) (set' [ local broadcast multicast ])) drop]
       [(is.eq ip.protocol (set' [ local broadcast multicast ])) drop]
@@ -341,13 +340,13 @@ assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; with t
       [(is.eq ip6.nexthdr (set' [ "tcp" "udp" ])) (is.eq th.dport (set' [ 22 53 80 443 853 ])) accept];
   };
   global = table { family = families.inet; } {
-    inbound_wan = chain {}
+    inbound_wan = chain
       [(is.eq ip.protocol "icmp") (is.ne icmp.type (with icmpTypes; set' [ destination-unreachable echo-request time-exceeded parameter-problem ])) drop]
       [(is.eq ip6.nexthdr "icmpv6") (is.ne icmpv6.type (with icmpv6Types; set' [ destination-unreachable echo-request time-exceeded parameter-problem packet-too-big nd-neighbor-solicit ])) drop]
       [(is.eq ip.protocol "icmp") accept]
       [(is.eq ip6.nexthdr "icmpv6") accept]
       [(is.eq th.dport 22) accept];
-    inbound_lan = chain {}
+    inbound_lan = chain
       [accept];
     inbound = chain { type = chainTypes.filter; hook = hooks.input; prio = 0; policy = chainPolicies.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]

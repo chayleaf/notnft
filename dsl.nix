@@ -6,6 +6,7 @@ let
     else if builtins.isAttrs x then builtins.removeAttrs x [ "__functor" ]
     else x);
   # yes, recursion, too lazy to throw
+  # essentially recursion means not enough info is being passed somehow
   passInfo = x: info:
     let info' = info // { __args__ = true; }; in
     if builtins.isFunction x then passInfo (x info') info' else toList x;
@@ -36,7 +37,7 @@ self = rec {
           __list__ = self.__list__ ++ (passNamesAnd { table = name; inherit family; } obj);
         };
     };
-  chain = {
+  chain' = {
     family ? null
     , table ? null
     , name ? null
@@ -46,7 +47,7 @@ self = rec {
     , dev ? null
     , policy ? null
   } @ attrs: 
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs chain attrs
+    if !attrs?name || !attrs?family || !attrs?table then takeArgs chain' attrs
     else {
       __list__ = [ { add.chain = attrs; } ];
       __functor = self: obj:
@@ -60,6 +61,7 @@ self = rec {
             in self.__list__ ++ (passInfo obj' { chain = name; inherit family table; });
         };
     };
+  chain = chain' {};
   rule' = {
     family ? null
     , table ? null
@@ -200,9 +202,6 @@ self = rec {
   } @ attrs: 
     if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct expectation" attrs
     else special { add."ct expectation" = attrs; };
-  # RULE | SET | MAP | ELEMENT |
-  # FLOWTABLE | COUNTER | QUOTA | CT_HELPER | LIMIT |
-  # CT_TIMEOUT | CT_EXPECTATION
   match = builtins.mapAttrs (_: op: left: right: {
     match = {
       inherit op left right;
@@ -260,16 +259,6 @@ self = rec {
   # anonymous set
   set' = x: { set = x; };
   limit' = x: { limit = x; };
-  th.sport.payload = {
-    base = notnft.payloadBases.th;
-    offset = 0;
-    len = 16;
-  };
-  th.dport.payload = {
-    base = notnft.payloadBases.th;
-    offset = 16;
-    len = 16;
-  };
   cidr = addr: len: { prefix = { inherit addr len; }; };
   masquerade = { masquerade = {}; };
   masquerade' = attrs: { masquerade = attrs; };
