@@ -21,6 +21,7 @@ in rec {
     else compileExpr x;
   compileExpr = x:
     if builtins.isString x && lib.hasPrefix "@" x then "@${compileStr (lib.removePrefix "@" x)}"
+    else if x == "*" then x
     else if builtins.isString x then compileStr x
     else if builtins.isPath x then compileStr (toString x)
     else if builtins.isInt x then toString x
@@ -28,7 +29,7 @@ in rec {
     else if builtins.isFloat x then throw "nftables doesn't support floating point numbers"
     else if builtins.isNull x then throw "nftables doesn't support nulls"
     else if builtins.isFunction x then throw "nftables doesn't support functions"
-    else if builtins.isList x then throw "how do you expect \"list expressions\" to work, please tell me so I can comprehend nftables's docs"
+    else if builtins.isList x then cat ", " (map compileExpr x)
     else if x?concat then cat " . " (map compileExpr x.concat)
     else if x?jump then "jump ${compileExpr x.jump}"
     else if x?goto then "goto ${compileExpr x.goto}"
