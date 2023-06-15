@@ -26,7 +26,7 @@ data types:
 */
 
 let
-  cfg = config.notnftConfig or {};
+  cfg = config.notnft or {};
   enumMode = cfg.enumMode or "normal";
   laxEnums = enumMode == "lax";
   strictEnums = enumMode == "strict";
@@ -3764,11 +3764,13 @@ in rec {
     weekDays = days;
     dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
   };
-  options.notnftConfig.enumMode = lib.mkOption {
-    default = "normal";
-    type = lib.types.str;
-    description = lib.mdDoc ''
-      Enum mode. "strict" to disallow using strings, "normal" for default behavior, "lax" to disable enum checks.
-    '';
+  options.notnft = (builtins.mapAttrs (k: v: lib.mkOption { type = lib.types.unspecified; readOnly = true; }) config.notnft) // {
+    enumMode = lib.mkOption {
+      default = "normal";
+      type = lib.types.str;
+      description = lib.mdDoc ''
+        Enum mode. "strict" to disallow using strings, "normal" for default behavior, "lax" to disable enum checks.
+      '';
+    };
   };
 }
