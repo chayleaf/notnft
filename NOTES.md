@@ -16,6 +16,13 @@ A: there's syntax like `ct helper set "ftp-standard"`, everything after
 map { 69 : "tftp-69", 5060 : "sip-5060" }`), better have it be a proper
 expr
 
+Q: what the hell are list expressions? (not set expressions)
+A: I don't know exactly, initial release memo says "This is currently
+  only used for specifying multiple flag values", but this isn't initial
+  release, and there's proper list support in the nftables-json parser
+  itself. Basically, it's mostly useless, but there may be some super
+  niche use cases.
+
 - `parse_family` - parse any family
 - `json_parse_family` - parse `family` from a JSON object and ensure
   it's an IP family (`NFPROTO_IPV4`/`NFPROTO_IPV6`), or return
@@ -55,10 +62,11 @@ expr
   - the constant itself (e.g. `IPPROTO_TCP`, `IPPROTO_UDP`,
     `ICMP_REDIRECT`)
 - `json_parse_immediate`:
-  - for boolean, returna a constant corresponding to said boolean
+  - for boolean, return a constant corresponding to said boolean
   - for integer, convert the integer to string and return a "value"
     symbol
   - for `"*"`, return wildcard expression
+    - not sure what this is for, probably as a set/map key
   - for constants, return `json_parse_constant`
   - for keywords, do the next step but explicitly (there's a special
     check that does the same thing as the next step anyway)
