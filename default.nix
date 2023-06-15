@@ -264,7 +264,7 @@ let
       };
     };
 
-  oneOf = { name, description, descriptionClass ? "noun", types, chk? (_: true) }: lib.types.mkOptionType rec {
+  oneOf' = { name, description, descriptionClass ? "noun", types, chk? (_: true) }: lib.types.mkOptionType rec {
     inherit name description descriptionClass;
     check = x: builtins.any (type: type.check x) types && chk x;
     nestedTypes = builtins.listToAttrs (lib.imap0 (i: x: { name = toString i; value = x; }) types);
@@ -743,7 +743,7 @@ let
           description = lib.mdDoc ''The ct helper type name, e.g. **"ftp"** or **"tftp"**.'';
         };
         protocol = {
-          type = types.ctHelperL4Proto;
+          type = types.ctProto;
           description = "The ct helper’s layer 4 protocol.";
         };
         l3proto = {
@@ -839,7 +839,7 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         protocol = {
-          type = types.ctHelperL4Proto;
+          type = types.ctProto;
           description = "The ct timeout object’s layer 4 protocol.";
         };
         l3proto = {
@@ -887,7 +887,7 @@ let
           description = lib.mdDoc ''The ct expectation object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
         protocol = {
-          type = types.ctHelperL4Proto;
+          type = types.ctProto;
           description = "The ct expectation object’s layer 4 protocol.";
         };
         dport = {
@@ -953,6 +953,7 @@ let
       } else {});
     };
   in {
+    inherit submodule' submoduleWith' submoduleSK oneOf';
     listOfSize2 = elemType:
       let list = lib.types.addCheck (lib.types.listOf elemType) (l: builtins.length l == 2);
       in list // {
@@ -1081,15 +1082,10 @@ let
         value = if builtins.isInt def.value then def.value else toString def.value;
       }) defs);
     };
-    ctHelperL4Proto = mkEnum {
-      name = "nftablesCtHelperL4Proto";
-      description = "nftables CT helper L4 protocol";
-      enum = lib.filterAttrs (x: builtins.isAttrs x && builtins.isAttrs (x.__info__ or {}) && (x.__info__ or {}).inCtHelper or false) l4protocols;
-    };
-    l4Proto = mkEnum {
-      name = "nftablesL4Proto";
-      description = "nftables layer 4 protocol";
-      enum = l4protocols;
+    ctProto = mkEnum {
+      name = "nftablesCtProto";
+      description = "nftables ct protocol";
+      enum = ctProtocols;
     };
     l3Proto = mkEnum {
       name = "nftablesL3Proto";
@@ -1546,7 +1542,7 @@ let
         default = 1;
       };
     };
-    addCommand = oneOf {
+    addCommand = oneOf' {
       name = "nftablesAddCommand";
       description = "add command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1578,7 +1574,7 @@ let
         };
       };
     };
-    createCommand = oneOf {
+    createCommand = oneOf' {
       name = "nftablesCreateCommand";
       description = "nftables create command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1610,7 +1606,7 @@ let
         };
       };
     };
-    deleteCommand = oneOf {
+    deleteCommand = oneOf' {
       name = "nftablesDeleteCommand";
       description = "nftables delete command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1641,7 +1637,7 @@ let
       merge = loc: defs: null;
       emptyValue = { value = null; };
     };
-    listCommand = oneOf {
+    listCommand = oneOf' {
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1679,7 +1675,7 @@ let
         # synproxys = types.synproxyToAdd;
       };
     };
-    resetCommand = oneOf {
+    resetCommand = oneOf' {
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1694,7 +1690,7 @@ let
         rules = types.null;
       };
     };
-    flushCommand = oneOf {
+    flushCommand = oneOf' {
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -1717,7 +1713,7 @@ let
         };
       };
     };
-    command = oneOf {
+    command = oneOf' {
       name = "nftablesCommand";
       description = "nftables command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -2141,7 +2137,7 @@ let
         description = "Optional flags.";
       };
     };
-    statement = oneOf {
+    statement = oneOf' {
       name = "nftablesStatement";
       description = "nftables statement";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -2363,7 +2359,7 @@ let
         type = types.payloadField;
       };
     };
-    payloadExpression = oneOf {
+    payloadExpression = oneOf' {
       name = "nftablesPayloadExpression";
       description = "nftables payload expression";
       types = [ types.rawPayloadExpression types.namedPayloadExpression ];
@@ -2420,7 +2416,7 @@ let
         type = types.tcpOptionField;
       };
     };
-    tcpOptionExpression = oneOf {
+    tcpOptionExpression = oneOf' {
       name = "nftablesTcpOptionExpression";
       description = "nftables tcp option expression";
       types = [ types.rawTcpOptionExpression types.namedTcpOptionExpression ];
@@ -2640,7 +2636,7 @@ let
         type = types.expression;
       };
     };
-    expression' = attrs: oneOf ({
+    expression' = attrs: oneOf' ({
       name = "nftablesExpression";
       description = "nftables expression";
       types = [ lib.types.str lib.types.int lib.types.bool (lib.types.listOf types.expression) types.dslExprHackType ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
@@ -3088,15 +3084,16 @@ let
     postrouting = {};
     ingress = {};
   };
-  l4protocols = mkEnum "l4protocols" {
-    tcp = { inCtHelper = true; };
-    udp = { inCtHelper = true; };
-    dccp = {};
-    sctp = {};
-    gre = {};
-    icmpv6 = {};
-    icmp = {};
-    generic = {};
+  ctProtocols = mkEnum "ctProtocols" {
+    tcp = { };
+    udp = { };
+    # documented but not actually supported
+    # dccp = {};
+    # sctp = {};
+    # gre = {};
+    # icmpv6 = {};
+    # icmp = {};
+    # generic = {};
   };
   timeUnits = mkEnum "timeUnits" {
     second = {};
@@ -3286,20 +3283,6 @@ let
     # count = ff; - ? apparently documented but not supported
     id = ff;
   };
-  connectionStates = mkEnum "connectionStates" {
-    close.proto = "tcp";
-    close_wait.proto = "tcp";
-    established.proto = "tcp";
-    fin_wait.proto = "tcp";
-    last_ack.proto = "tcp";
-    retrans.proto = "tcp";
-    syn_recv.proto = "tcp";
-    syn_sent.proto = "tcp";
-    time_wait.proto = "tcp";
-    unack.proto = "tcp";
-    replied.proto = "udp";
-    unreplied.proto = "udp";
-  };
   operators' = mkEnum "operators" {
     "&" = { };
     "|" = { };
@@ -3332,12 +3315,12 @@ let
     in' = operators'."in";
     implicit = operators'."in";
   };
+  flowtableOps = mkEnum "flowOps" {
+    add = { };
+  };
   ipsecDirs = mkEnum "ipsecDirs" {
     "in" = { };
     out = { };
-  };
-  flowtableOps = mkEnum "flowOps" {
-    add = { };
   };
   ipsecKeys = mkEnum "ipsecKeys" {
     # basically, family is only actually used in daddr/saddr
@@ -3718,7 +3701,6 @@ let
     sit = 776;
     ipgre = 778;
   };
-  # yes, it isn't stati but statuses, english is very inconsistent
   ctStatuses = builtins.mapAttrs (k: v: k) {
     expected = 1;
     seen-reply = 2;
@@ -3744,9 +3726,42 @@ let
     Friday = 5;
     Saturday = 6;
   };
+  connectionStates' = {
+    close.proto = "tcp";
+    close_wait.proto = "tcp";
+    established.proto = "tcp";
+    fin_wait.proto = "tcp";
+    last_ack.proto = "tcp";
+    retrans.proto = "tcp";
+    syn_recv.proto = "tcp";
+    syn_sent.proto = "tcp";
+    time_wait.proto = "tcp";
+    unack.proto = "tcp";
+    replied.proto = "udp";
+    unreplied.proto = "udp";
+  };
+  connectionStates = builtins.mapAttrs (k: v: k) connectionStates';
+  tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp"));
+  udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp"));
 in rec {
   config.notnft = {
-    inherit families chainTypes types wildcard setReference payloadBases payloadProtocols payloadFields exthdrs exthdrFields tcpOptions tcpOptionFields sctpChunks sctpChunkFields metaKeys rtKeys ctKeys ctDirs ngModes fibAddrTypes fibResults fibFlags socketKeys osfKeys osfTtl priorities hooks chainPolicies nftTypes setPolicies setFlags operators tcpFlags  exists missing icmpTypes icmpv6Types timeUnits ctStates igmpTypes dscpTypes ecnTypes mhTypes isValidExpr ipsecDirs ipsecKeys nfprotoTypes inetProtos icmpCodes icmpv6Codes icmpxCodes booleans etherTypes arpOps dccpPktTypes ifaceTypes ctStatuses pktTypes days rateUnits natFlags natTypeFlags rejectTypes setOperations logFlags synproxyFlags;
+    inherit
+      arpOps booleans chainPolicies chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
+      days dccpPktTypes dscpTypes ecnTypes etherTypes exists exthdrFields exthdrs
+      families fibAddrTypes fibFlags fibResults hooks
+      icmpCodes icmpTypes icmpv6Codes icmpv6Types icmpxCodes ifaceTypes igmpTypes
+      inetProtos ipOptionFields ipOptions ipsecDirs ipsecKeys isValidExpr
+      logFlags logLevels metaKeys mhTypes missing
+      natFlags natTypeFlags nfprotoTypes nftTypes ngModes operators osfKeys osfTtl
+      payloadBases payloadFields payloadProtocols pktTypes priorities
+      queueFlags rateUnits rejectTypes rtKeys
+      sctpChunkFields sctpChunks setFlags setOperations setPolicies setReference socketKeys synproxyFlags
+      tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
+      udpConnectionStates wildcard xtTypes;
+    # "time to lives" doesn't sound good but add an alias anyway for consistency
+    osfTtls = osfTtl;
+    # "days" isn't very descriptive, so here's an alias
+    weekDays = days;
     dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
   };
   options.notnftConfig.enumMode = lib.mkOption {

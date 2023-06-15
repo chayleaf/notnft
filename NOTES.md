@@ -419,6 +419,8 @@ A: I don't know exactly, initial release memo says "This is currently
   mention that `family` and `table` is required practically everywhere
   even if you're removing or listing, not adding an object). Also, `ct
   helper`s don't receive a handle and `ct timeout`s receive `policy`
-  instead of `state` and `value` and Santa isn't real.
+  instead of `state` and `value`, `ct X` objects only allow `tcp` and
+  `udp` protocols even though the docs mention way more and Santa isn't
+  real.
 - metainfo: only checks `json_schema_version` (1 at the moment).
   Serializes also `version` and `release_name`
