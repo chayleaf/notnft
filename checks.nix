@@ -340,24 +340,24 @@ assert chkTypeJson types.ruleset (with flake; with dsl.payload; with dsl; rulese
   };
   global = table { family = families.inet; } {
     inbound_wan = chain
-      [(is.eq ip.protocol "icmp") (is.ne icmp.type (with icmpTypes; set' [ destination-unreachable echo-request time-exceeded parameter-problem ])) drop]
-      [(is.eq ip6.nexthdr "icmpv6") (is.ne icmpv6.type (with icmpv6Types; set' [ destination-unreachable echo-request time-exceeded parameter-problem packet-too-big nd-neighbor-solicit ])) drop]
-      [(is.eq ip.protocol "icmp") accept]
-      [(is.eq ip6.nexthdr "icmpv6") accept]
+      [(is.eq ip.protocol inetProtos.icmp) (is.ne icmp.type (with icmpTypes; set' [ destination-unreachable echo-request time-exceeded parameter-problem ])) drop]
+      [(is.eq ip6.nexthdr inetProtos.ipv6-icmp) (is.ne icmpv6.type (with icmpv6Types; set' [ destination-unreachable echo-request time-exceeded parameter-problem packet-too-big nd-neighbor-solicit ])) drop]
+      [(is.eq ip.protocol inetProtos.icmp) accept]
+      [(is.eq ip6.nexthdr inetProtos.ipv6-icmp) accept]
       [(is.eq th.dport 22) accept];
     inbound_lan = chain
       [accept];
     inbound = chain { type = chainTypes.filter; hook = hooks.input; prio = 0; policy = chainPolicies.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
       [(is.eq (op."&" tcp.flags tcpFlags.syn) 0) (is.eq ct.state ctStates.new) drop]
-      [(vmap meta.iifname { lo = accept; "wan0" = jump "inbound_wan"; "lan0" = jump "inbound_lan"; })];
+      [(vmap meta.iifname { lo = accept; wan0 = jump "inbound_wan"; lan0 = jump "inbound_lan"; })];
     forward = chain { type = chainTypes.filter; hook = hooks.forward; prio = 0; policy = chainPolicies.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
       [(is.eq meta.iifname "wan0") (is.eq meta.oifname "lan0") accept]
       [(is.eq meta.iifname "lan0") accept]
       [(is.eq meta.iifname "wan0") (is.eq meta.oifname "wan0") accept];
     postrouting = chain { type = chainTypes.nat; hook = hooks.postrouting; prio = 0; policy = chainPolicies.accept; }
-      [(is.eq meta.protocol (set' [ "ip" "ip6" ])) (is.eq meta.iifname "lan0") (is.eq meta.oifname "wan0") masquerade];
+      [(is.eq meta.protocol (with etherTypes; set' [ ip ip6 ])) (is.eq meta.iifname "lan0") (is.eq meta.oifname "wan0") masquerade];
     block4 = set { type = nftTypes.ipv4_addr; flags = with setFlags; [ interval ]; } [
       (cidr "194.190.137.0" 24)
       (cidr "194.190.157.0" 24)
