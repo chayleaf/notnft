@@ -2,28 +2,6 @@
 , config ? {}
 , ...
 }:
-# https://git.netfilter.org/nftables/tree/src/parser_json.c?id=9f5dc2b6297cb2507718222c7309516207420288
-
-/*
-data types:
-- int
-  - conntrack direction :8
-  - bitmask
-    - conntrack state :4
-    - conntrack status :4
-    - conntrack event bits :4
-    - conntrack label :128
-  - lladdr (mac address?)
-  - ipv4 (32bit)
-  - ivp6 (128bit), may be enclosed in [] if has a port
-  - bool (1bit: exists or missing)
-  - icmp type (8bit)
-  - icmp code type (8bit)
-  - icmpv6 type (8bit)
-  - icmpv6 code type (8bit)
-- string
-- list = { ",".join(members) }
-*/
 
 let
   cfg = config.notnft or {};
@@ -124,6 +102,19 @@ let
         hasAllBits ctx (contexts.${key} or CTX_F_ALL)
         && (extraChecks.${key} or (expr: true)) expr.${key};
 
+  # this is a customized version of lib.types.submodule
+  # - advantages:
+  #   - a custom merge functions can be applied at the end, for doing some final checks and fixups
+  #   - I use null as a placeholder for undefined values. By default nulls are automatically stripped from the merged output,
+  #     unless `skipNulls` is `false`
+  #   - hence description is much better as it's aware of both nullable and non-nullable options
+  #   - a custom chk function can be applied. Also, the default chk function checks that all fields are present
+  #     - this is needed for either to function well with nftables' schema, as it only uses `chk` to check whether a type is compatible
+  #     - but I don't need `lib.types.either` or `lib.types.oneOf` anyway as I use a custom `oneOf'`...
+  # - disadvantages:
+  #   - the above means that unlike lib.types.submodule, here you can't define the same submodule in multiple separate files,
+  #     the definition must be contained in a single attrset (you can't use functions/nix file paths in place of the attrset either)
+  #   - Honestly I'm not sure why you would set a single nftables expr/stmt in multiple different locations, so it should be fine.
   submodule' = { options, finalMerge ? lib.id, skipNulls ? true, freeformType ? null, chk ? null }:
   let
     reqFields = builtins.attrNames (if skipNulls then lib.filterAttrs (k: v: v.type.name != "nullOr") options else options);
@@ -149,6 +140,7 @@ let
       chk = if chk != null then chk else x: builtins.all (optName: x?${optName}) reqFields;
       inherit finalMerge skipNulls;
     };
+  # single-option submodule' (SK = single key)
   submoduleSK = key: val: submodule' {
     skipNulls = false;
     options.${key} = val;
@@ -175,24 +167,7 @@ let
 
       base = evalModules {
         inherit class specialArgs;
-        modules = [{
-          # This is a work-around for the fact that some sub-modules,
-          # such as the one included in an attribute set, expects an "args"
-          # attribute to be given to the sub-module. As the option
-          # evaluation does not have any specific attribute name yet, we
-          # provide a default for the documentation and the freeform type.
-          #
-          # This is necessary as some option declaration might use the
-          # "name" attribute given as argument of the submodule and use it
-          # as the default of option declarations.
-          #
-          # We use lookalike unicode single angle quotation marks because
-          # of the docbook transformation the options receive. In all uses
-          # &gt; and &lt; wouldn't be encoded correctly so the encoded values
-          # would be used, and use of `<` and `>` would break the XML document.
-          # It shouldn't cause an issue since this is cosmetic for the manual.
-          _module.args.name = lib.mkOptionDefault "‹name›";
-        }] ++ modules;
+        modules = [{ _module.args.name = lib.mkOptionDefault "‹name›"; }] ++ modules;
       };
 
       freeformType = base._module.freeformType;
@@ -264,6 +239,8 @@ let
       };
     };
 
+  # a custom oneOf that doesn't use `builtins.either` and has customized name/description/chk
+  # also instead of just calling `chk` when merging, it properly checks whether the values merge with that type via tryEval
   oneOf' = { name, description, descriptionClass ? "noun", types, chk? (_: true) }: lib.types.mkOptionType rec {
     inherit name description descriptionClass;
     check = x: builtins.any (type: type.check x) types && chk x;
@@ -283,13 +260,11 @@ let
         else res;
   };
 
-  mkEnum = enum: builtins.mapAttrs (k: v: {
-    __enum__ = enum;
-    __value__ = k;
-    __info__ = v;
-    __toString = self: self.__value__;
-  });
   types =
+    # create "name type". Name type is anything that can receive either a name as a literal string or an attrset
+    # with the property "name", in which case the property will be taken instead.
+    # In hindsight, this might not be a good decision, but I don't see any major downsides either
+    # addAt means check for "@" in case of a string, or add "@" before the name in case of name attr
     let mkName = { name, description, addAt ? false }: lib.mkOptionType {
       name = "${name}";
       description = "${description}";
@@ -301,10 +276,12 @@ let
           else toString value;
       }) defs);
     };
+    # create an option with the same attrs as given but make it nullable and default to null
     mkNullOption = attrs: lib.mkOption (attrs // {
       default = null;
       type = lib.types.nullOr attrs.type;
     });
+    # this creates an enum type out of an enum (see the other mkEnum function below for a description of what enums are)
     mkEnum = { name, description, enum }: lib.mkOptionType {
       inherit name description;
       descriptionClass = "noun";
@@ -2808,8 +2785,15 @@ let
     } // attrs);
     expression = types.expression' {};
   };
-  wildcard = "*";
-  setReference = s: "@${s}";
+  # this is a function that takes a enum name and enum attrs (key = enum element, val = enum element info)
+  # and for each enum element sets __enum__ to enum name, __value__ to element name,
+  # __info__ to info, __toString to a func that returns the element name
+  mkEnum = enum: builtins.mapAttrs (k: v: {
+    __enum__ = enum;
+    __value__ = k;
+    __info__ = v;
+    __toString = self: self.__value__;
+  });
   nftTypes = mkEnum "nftTypes" {
     invalid = { };
     verdict = { };
@@ -3744,6 +3728,8 @@ let
   connectionStates = builtins.mapAttrs (k: v: k) connectionStates';
   tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp"));
   udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp"));
+  wildcard = "*";
+  setReference = s: "@${s}";
 in rec {
   config.notnft = {
     inherit
