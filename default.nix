@@ -1815,7 +1815,8 @@ let
         description = "Value to change data to.";
       };
     };
-    quotaStatement = lib.types.either lib.types.str (submodule' {
+    quotaStatement = submodule' {
+      finalMerge = x: if x?used_unit && !x?used then throw "If quota stmt has used_unit, must specify used as well" else x;
       options.val = lib.mkOption {
         type = lib.types.int;
         description = "Quota value.";
@@ -1839,8 +1840,8 @@ let
         description = lib.mdDoc "If **true**, will match if the quota has been exceeded. Defaults to **false**.";
         defaultText = lib.literalExpression false;
       };
-    });
-    limitStatement = lib.types.either lib.types.str (submodule' {
+    };
+    limitStatement = submodule' {
       finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then throw "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
       options.rate = lib.mkOption {
         type = lib.types.int;
@@ -1870,7 +1871,7 @@ let
         description = lib.mdDoc "If **true**, matches if the limit was exceeded. Defaults to **false**.";
         defaultText = lib.literalExpression false;
       };
-    });
+    };
     # TODO actually check
     ipAddr = lib.types.strMatching (x: true);
     fwdStatement = submodule' {
@@ -2197,8 +2198,8 @@ let
           description = "The first form creates an anonymous quota which lives in the rule it appears in. The second form specifies a reference to a named quota object.";
         };
         limit = {
-          type = types.limitStatement;
-          description = "The first form creates an anonymous quota which lives in the rule it appears in. The second form specifies a reference to a named quota object.";
+          type = lib.types.either types.limitStatement (types.expression' { chk = isValidExpr CTX_F_STMT; });
+          description = "The first form creates an anonymous quota which lives in the rule it appears in. The second form specifies a reference to a named limit object.";
         };
         fwd = {
           type = types.fwdStatement;
@@ -3763,6 +3764,8 @@ in rec {
     # "days" isn't very descriptive, so here's an alias
     weekDays = days;
     dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
+    inherit (import ./compile.nix { inherit (config) notnft; inherit lib; })
+      compileCmd compileExpr compileObject compileRuleset compileSetElem compileStmt compileStr;
   };
   options.notnft = (builtins.mapAttrs (k: v: lib.mkOption { type = lib.types.unspecified; readOnly = true; }) config.notnft) // {
     enumMode = lib.mkOption {

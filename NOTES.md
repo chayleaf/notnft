@@ -333,6 +333,7 @@ A: I don't know exactly, initial release memo says "This is currently
     - `seconds_from_unit` as applicable, but if `rate_unit` is packets
       (default) then those get ignored and burst defaults to 5
       (if it isn't `packets` then burst defaults to 0)
+  - otherwise parse limit reference
 - `json_parse_fwd_stmt`:
   - get `dev` expr in stmt context
   - get optional ip `family` (`json_parse_family`)

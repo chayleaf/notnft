@@ -70,8 +70,43 @@ in rec {
     else if x?socket then "socket ${x.socket.key}"
     else if x?osf then "osf${optPre " ttl " x.osf.ttl} ${x.osf.key}"
     else throw "unexpected expr ${builtins.toJSON x}";
+
   compileStmt = x:
-    throw "todo";
+    if x?accept || x?drop || x?continue || x?return then builtins.head (builtins.attrNames x)
+    else if x?goto then "goto ${x.goto.target}"
+    else if x?jump then "jump ${x.jump.target}"
+    else if x?match then optCat " " [ x.match.left (if x.match.op == "in" then null else x.match.op) x.match.right ]
+    else if x?counter && x.counter == null then "counter"
+    else if x?counter.packets && x?counter.bytes then "counter packets ${toString x.counter.packets} bytes ${toString x.counter.bytes}"
+    else if x?counter then "counter name ${compileExpr x.counter}"
+    else if x?mangle then "${compileExpr x.mangle.key} set ${compileExpr x.mangle.value}"
+    # quota [over/until] <num> <unit> [used <num>]
+    else if x?quota.val then "quota ${if x.quota.inv or false then "over" else "until"} ${toString x.quota.val} ${x.quota.val_unit}${optPreSuf " used" " ${x.quota.used_unit or "bytes"}" x.quota.used}"
+    else if x?quota then "quota name ${compileExpr x.quota}"
+    else if x?limit then "limit name ${compileExpr x.limit}"
+    else if x?fwd then throw "todo"
+    else if x?notrack then throw "todo"
+    else if x?snat then throw "todo"
+    else if x?dnat then throw "todo"
+    else if x?masquerade then throw "todo"
+    else if x?redirect then throw "todo"
+    else if x?reject then throw "todo"
+    else if x?set then throw "todo"
+    else if x?log then throw "todo"
+    else if x?"ct helper" then throw "todo"
+    else if x?queue then throw "todo"
+    else if x?vmap then throw "todo"
+    else if x?"ct count" then throw "todo"
+    else if x?"ct timeout" then throw "todo"
+    else if x?"ct expectation" then throw "todo"
+    else if x?xt then throw "todo"
+    else if x?flow then throw "todo"
+    else if x?tproxy then throw "todo"
+    else if x?synproxy then throw "todo"
+    else if x?reset then throw "todo"
+    else if x?secmark then throw "todo"
+    else throw "Unsupported statement ${builtins.toJSON x}";
+
   compileObject = obj:
     if obj?table then let x = obj.table; in optCat " " [
       "table"
@@ -115,10 +150,10 @@ in rec {
     else if obj?"ct expectation" then let x = obj."ct expectation"; in throw "todo"
     else throw "couldn't compile object with keys ${builtins.toJSON (builtins.attrNames obj)}";
       
-  compileCommand = cmd:
+  compileCmd = cmd:
     if cmd?metainfo then "# ${builtins.toJSON cmd}"
     else let attr = lib.head (builtins.attrNames cmd); in "${attr} ${compileObject cmd.${attr}}";
 
   compileRuleset = { nftables }:
-    cat "\n" (map compileCommand nftables);
+    cat "\n" (map compileCmd nftables);
 }
