@@ -127,7 +127,7 @@ let
   # specifically, this is used when passed a closure in the DSL for RHS of an operation
   # warning: this may not yet be merged
   exprEnums = expr:
-    lib.trace expr (if builtins.isList expr then builtins.concatMap exprEnums expr
+    (if builtins.isList expr then builtins.concatMap exprEnums expr
     else if !(builtins.isAttrs expr) then []
     else if expr?__expr__ then exprEnums expr.__expr__
     else if expr?__enumName__ && nftTypes?${expr.__enumName__}.enum then [ nftTypes.${expr.__enumName__}.enum ]
@@ -186,7 +186,7 @@ let
       # symhash = [ ];
       fib =
         if isStringLike (val.result or null)
-        then lib.toList (lib.traceVal ({ type = fibAddrTypes; }.${toString val.result} or []))
+        then lib.toList ({ type = fibAddrTypes; }.${toString val.result} or [])
         else [ ];
       "|" = exprEnums val;
       "^" = exprEnums val;
