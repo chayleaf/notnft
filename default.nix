@@ -1204,11 +1204,11 @@ let
       description = "nftables rate unit";
       enum = rateUnits;
     };
-    connectionState = mkEnum {
+    /*connectionState = mkEnum {
       name = "nftablesConnectionState";
       description = "nftables connection state";
       enum = connectionStates;
-    };
+    };*/
     operator = mkEnum {
       name = "nftablesOperators";
       description = "nftables operator";
@@ -2965,7 +2965,7 @@ let
           spl));
     ether_type = { bits = 16; description = "Ethernet protocol"; enum = etherTypes; };
     arp_op = { bits = 16; description = "ARP operation"; enum = arpOps; };
-    inet_proto = { bits = 8; description = "Internet protocol"; enum = inetProtos; };
+    inet_proto = { bits = 8; description = "Internet protocol"; enum = inetProtos'; };
     inet_service = { bits = 16; description = "internet network service"; }; # port
     icmp_type = { bits = 8; description = "ICMP type"; enum = icmpTypes; };
     tcp_flag = { bits = 8; description = "TCP flag"; enum = tcpFlags; };
