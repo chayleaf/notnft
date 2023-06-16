@@ -28,7 +28,10 @@ self = rec {
   # compile just extracts the list from the dsl
   compile = x: toList x;
   ruleset = x: { nftables = passNames x; };
-  table = { family ? null, name ? null } @ attrs:
+  table = { family ? null, name ? null } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?name || !attrs?family then takeArgs table attrs
     else special {
       __list__ = [ { add.table = attrs; } ];
@@ -46,7 +49,19 @@ self = rec {
     , prio ? null
     , dev ? null
     , policy ? null
-  } @ attrs: 
+  } @ attrs': 
+    let attrs = attrs' // (if builtins.isFunction family then {
+      family = family notnft.families;
+    } else {}) // (if builtins.isFunction type then {
+      type = type notnft.chainTypes;
+    } else {}) // (if builtins.isFunction hook then {
+      hook = hook notnft.hooks;
+    } else {}) // (if builtins.isFunction policy then {
+      policy = policy notnft.chainPolicies;
+    } else {}) // (if builtins.isFunction prio && attrs'?family then {
+      prio = prio (builtins.mapAttrs (k: v: v.value (toString family))
+        (lib.filterAttrs (k: v: (!v?families || builtins.elem (toString family) v.families) && (!v?hooks || builtins.elem (toString hook) v.hooks)) notnft.priorities));
+    } else {}); in
     if !attrs?name || !attrs?family || !attrs?table then takeArgs chain' attrs
     else {
       __list__ = [ { add.chain = attrs; } ];
@@ -67,7 +82,10 @@ self = rec {
     , table ? null
     , chain ? null
     , comment ? null
-  } @ attrs: 
+  } @ attrs': 
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?chain || !attrs?family || !attrs?table then takeArgs rule' attrs
     else {
       add.rule = attrs; 
@@ -90,12 +108,27 @@ self = rec {
     , timeout ? null
     , gc-interval ? null
     , size ? null
-  } @ attrs:
+  } @ attrs':
+    let
+      attrs = attrs' // (if builtins.isFunction family then {
+        family = family notnft.families;
+      } else {}) // (if builtins.isFunction policy then {
+        policy = policy notnft.setPolicies;
+      } else {}) // (if builtins.isFunction type then {
+        type = type notnft.nftTypes;
+      } else {}) // (if builtins.isFunction flags then {
+        flags = flags notnft.setFlags;
+      } else {});
+      types' = builtins.toList type;
+      typeStrs = map toString types';
+      enums = builtins.filter (x: x != null) (map (x: notnft.nftType.${x}.enum or null) typeStrs);
+      enum = notnft.mergeEnums enums;
+    in
     if !attrs?name || !attrs?family || !attrs?table then takeArgs set attrs
     else {
       add.set = attrs;
-      __functor = self: obj:
-        self // {
+      __functor = self: obj':
+        let obj = if builtins.isFunction obj' then obj' enum else obj'; in self // {
           add.set = self.add.set // {
             elem = (self.add.set.elem or []) ++ (toList obj);
           };
@@ -113,7 +146,10 @@ self = rec {
     , timeout ? null
     , gc-interval ? null
     , size ? null
-  } @ attrs:
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?name || !attrs?family || !attrs?table then takeArgs map attrs
     else {
       add.map = attrs;
@@ -135,7 +171,10 @@ self = rec {
     , hook ? null
     , prio ? null
     , dev ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs flowtable attrs
     else special { add.flowtable = attrs; };
   counter = {
@@ -144,7 +183,10 @@ self = rec {
     , name ? null
     , packets ? null
     , bytes ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs counter attrs
     else special { add.counter = attrs; };
   quota = {
@@ -154,7 +196,10 @@ self = rec {
     , bytes ? null
     , used ? null
     , inv ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs quota attrs
     else special { add.quota = attrs; };
   "ct helper" = {
@@ -164,7 +209,10 @@ self = rec {
     , type ? null
     , protocol ? null
     , l3proto ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct helper" attrs
     else special { add."ct helper" = attrs; };
   limit = {
@@ -176,7 +224,10 @@ self = rec {
     , burst ? null
     , unit ? null
     , inv ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs limit attrs
     else special { add.limit = attrs; };
   "ct timeout" = {
@@ -187,7 +238,10 @@ self = rec {
     , state ? null
     , value ? null
     , l3proto ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct timeout" attrs
     else special { add."ct timeout" = attrs; };
   "ct expectation" = {
@@ -199,12 +253,19 @@ self = rec {
     , dport ? null
     , timeout ? null
     , size ? null
-  } @ attrs: 
+  } @ attrs':
+    let attrs = if builtins.isFunction family then attrs' // {
+      family = family notnft.families;
+    } else attrs'; in
     if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct expectation" attrs
     else special { add."ct expectation" = attrs; };
   match = builtins.mapAttrs (_: op: left: right: {
     match = {
-      inherit op left right;
+      inherit op left;
+      right =
+        if builtins.isFunction right
+        then right (lib.traceVal (notnft.exprEnumsMerged left))
+        else right;
     };
   }) notnft.operators;
   is = match;
@@ -227,13 +288,12 @@ self = rec {
     notnft.payloadProtocols;
   tcpOpt = builtins.mapAttrs
     (_: opt:
-      (builtins.listToAttrs (builtins.map (field: {
-        name = field;
-        value."tcp option" = {
+      (builtins.mapAttrs (field: _: {
+        "tcp option" = {
           name = opt;
           field = notnft.tcpOptionFields.${field};
         };
-      }) opt.fields)) // {
+      }) opt.fields) // {
         __expr__."tcp option".name = opt;
       })
     notnft.tcpOptions;
@@ -241,9 +301,11 @@ self = rec {
       if builtins.isList a && builtins.length a >= 2 then builtins.foldl' (old: new: {
         ${op} = [ old new ];
       }) (builtins.head a) (builtins.tail a)
-      else b: {
-    ${op} = [ a b ];
-  });
+      else b: if builtins.isFunction b then {
+        ${op} = [ a (b (notnft.exprEnumsMerged a)) ];
+      } else {
+        ${op} = [ a b ];
+      });
   meta = builtins.mapAttrs (_: key: {
     meta.key = key;
   }) notnft.metaKeys;
@@ -254,10 +316,20 @@ self = rec {
   jump = target: { jump.target = target; };
   goto = target: { goto.target = target; };
   range = a: b: { range = [ a b ]; };
-  fib = flags: result: { fib = { inherit flags result; }; };
+  fib =
+    flags':
+      let
+        flags = if builtins.isFunction flags' then flags' notnft.fibFlags else flags';
+      in result':
+        let result = if builtins.isFunction result' then result' notnft.fibResults else result'; in
+        { fib = { inherit flags result; }; };
   # anonymous set
   set' = x: { set = x; };
-  limit' = x: { limit = x; };
+  limit' = attrs @ { per ? null, ... }: {
+    limit = attrs // (if builtins.isFunction per then {
+      per = per notnft.timeUnits;
+    } else {});
+  };
   cidr = addr: len: { prefix = { inherit addr len; }; };
   masquerade = { masquerade = {}; };
   masquerade' = attrs: { masquerade = attrs; };

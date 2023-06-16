@@ -103,20 +103,31 @@ let
         && (extraChecks.${key} or (expr: true)) expr.${key};
 
   # get all expressions contained in an expression (non-recursive)
+  # warning: this may not yet be merged
   innerExprs = expr:
     if builtins.isList expr then expr
     else if !(builtins.isAttrs expr) then []
     else if builtins.length (builtins.attrNames expr) != 1 then []
-    else if expr?map then [ expr.map.key expr.map.data ]
-    else lib.toList (expr.jhash.expr or expr."|" or expr."&" or expr."^" or expr."<<" or expr.">>" or expr.concat or expr.prefix or expr.range or expr.set or expr.elem.val);
+    else if expr?map.key && expr?map.data then [ expr.map.key expr.map.data ]
+    else if expr?range.min && expr?range.max then [ expr.range.min expr.range.max ]
+    else if expr?"|".left && expr?"|".right then [ expr."|".left expr."|".right ]
+    else if expr?"&".left && expr?"&".right then [ expr."&".left expr."&".right ]
+    else if expr?"^".left && expr?"^".right then [ expr."^".left expr."^".right ]
+    else if expr?"<<".left && expr?"<<".right then [ expr."<<".left expr."<<".right ]
+    else if expr?">>".left && expr?">>".right then [ expr.">>".left expr.">>".right ]
+    else lib.toList (expr.jhash.expr or expr."|" or expr."&" or expr."^" or expr."<<" or expr.">>" or expr.concat or expr.prefix or expr.range or expr.set or expr.elem.val or []);
 
   # get the expr plus all of its inner exprs, recursively
+  # warning: this may not yet be merged
   innerExprsRec = expr: [ expr ] ++ (map innerExprsRec (innerExprs expr));
+
+  isStringLike = s: builtins.isString s || s?__toString;
 
   # get all enums appropriate for the expression (might have duplicates), or empty list
   # specifically, this is used when passed a closure in the DSL for RHS of an operation
+  # warning: this may not yet be merged
   exprEnums = expr:
-    if builtins.isList expr then builtins.concatLists (map exprEnums expr)
+    lib.trace expr (if builtins.isList expr then builtins.concatMap exprEnums expr
     else if !(builtins.isAttrs expr) then []
     else if expr?__enumName__ && nftTypes?${expr.__enumName__}.enum then [ nftTypes.${expr.__enumName__}.enum ]
     else if builtins.length (builtins.attrNames expr) != 1 then []
@@ -126,59 +137,74 @@ let
       # prefix = exprEnum val.addr;
       # range = exprEnum val;
       payload =
-        if val?base then []
-        else if !val?field then [ booleans ]
-        else if payloadProtocols?${val.protocol}.fields.${val.field}.enum then [ payloadProtocols.${val.protocol}.fields.${val.field}.enum ]
+        if val?base then [ ]
+        else if !(isStringLike (val.protocol or null)) then [ ]
+        else if !(isStringLike (val.field or null)) then [ booleans ]
+        else if (payloadProtocols?${toString val.protocol}.fields.${toString val.field}.enum) then [ payloadProtocols.${toString val.protocol}.fields.${toString val.field}.enum ]
         else [ ];
       exthdr =
-        if !val?field then [ booleans ]
-        else if exthdrs?${val.name}.fields.${val.field}.enum then [ exthdrs.${val.name}.fields.${val.field}.enum ]
+        if !(isStringLike (val.name or null)) then [ ]
+        else if !(isStringLike (val.field or null)) then [ booleans ]
+        else if exthdrs?${toString val.name}.fields.${toString val.field}.enum then [ exthdrs.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "tcp option" =
         if val?base then []
-        else if !val?field then [ booleans ]
-        else if tcpOptions?${val.name}.fields.${val.field}.enum then [ tcpOptions.${val.name}.fields.${val.field}.enum ]
+        else if !(isStringLike (val.name or null)) then [ ]
+        else if !(isStringLike (val.field or null)) then [ booleans ]
+        else if tcpOptions?${toString val.name}.fields.${toString val.field}.enum then [ tcpOptions.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "ip option" =
-        if !val?field then [ booleans ]
-        else if ipOptions?${val.name}.fields.${val.field}.enum then [ ipOptions.${val.name}.fields.${val.field}.enum ]
+        if !(isStringLike (val.name or null)) then [ ]
+        else if !(isStringLike (val.field or null)) then [ booleans ]
+        else if ipOptions?${toString val.name}.fields.${toString val.field}.enum then [ ipOptions.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "sctp chunk" =
-        if !val?field then [ booleans ]
-        else if sctpChunks?${val.name}.fields.${val.field}.enum then [ sctpChunks.${val.name}.fields.${val.field}.enum ]
+        if !(isStringLike (val.name or null)) then [ ]
+        else if !(isStringLike (val.field or null)) then [ booleans ]
+        else if sctpChunks?${toString val.name}.fields.${toString val.field}.enum then [ sctpChunks.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       meta =
-        if metaKeys?${val.key}.type.enum then [ metaKeys.${val.key}.type.enum ]
+        if isStringLike (val.key or null) && metaKeys?${toString val.key}.type.enum then [ metaKeys.${toString val.key}.type.enum ]
         else [ ];
       # osf = [ ]; returns a string
       # ipsec = [ ]; returns int/ipv4/ipv6 depending on params
       # can return other stuff too
       socket =
-        if val.key == "transparent" || val.key == "wildcard" then [ booleans ]
+        if isStringLike (val.key or null) && (toString val.key == "transparent" || toString val.key == "wildcard") then [ booleans ]
         else [ ];
       # returns realm/ipv4/ipv6/int/bool
-      rt = if val.key == "ipsec" then [ booleans ] else [ ];
-      ct = lib.toList ({
+      rt = if isStringLike (val.key or null) && toString val.key == "ipsec" then [ booleans ] else [ ];
+      ct = if isStringLike (val.key or null) then lib.toList ({
         state = ctStates;
         direction = ctDirs;
         status = ctStatuses;
         l3proto = nfProtos;
-      }.${val.key} or []);
+      }.${toString val.key} or []) else [ ];
       # numgen = [ ];
       # jhash = [ ];
       # symhash = [ ];
-      fib = lib.toList ({ type = fibAddrTypes; }.${val.result} or []);
+      fib =
+        if isStringLike (val.result or null)
+        then lib.toList (lib.traceVal ({ type = fibAddrTypes; }.${toString val.result} or []))
+        else [ ];
       "|" = exprEnums val;
       "^" = exprEnums val;
       "&" = exprEnums val;
       ">>" = exprEnums val;
       "<<" = exprEnums val;
-      elem = exprEnums val.val;
-    }.${key};
+      elem = val?val && exprEnums val.val;
+    }.${key});
 
   # get all enums appropriate for the expression (might have duplicates), or empty list
+  # warning: this may not yet be merged
   exprEnumsRec = expr:
     builtins.concatMap exprEnums (innerExprsRec expr);
+
+  mergeEnums = allEnums:
+    lib.filterAttrs (k: v: v != null) (builtins.zipAttrsWith (name: values: if builtins.length values == 1 then builtins.head values else null) (lib.unique allEnums));
+
+  # warning: expr may not yet be merged
+  exprEnumsMerged = expr: mergeEnums (exprEnumsRec expr);
 
   # this is a customized version of lib.types.submodule
   # - advantages:
@@ -259,7 +285,7 @@ let
         else freeformType.description or name;
       check = x: builtins.isAttrs x && chk x;
       merge = loc: defs:
-        lib.trace "merging" finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
+        finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
           modules = [ { _module.args.name = lib.last loc; } ] ++ allModules defs;
           prefix = loc;
         }).config);
@@ -290,13 +316,13 @@ let
             if lhs.class or null == null then rhs.class or null
             else if rhs.class or null == null then lhs.class or null
             else if lhs.class or null == rhs.class then lhs.class or null
-            else debugThrow "A submoduleWith' option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
+            else throw "A submoduleWith' option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
           modules = lhs.modules ++ rhs.modules;
           specialArgs =
             let intersecting = builtins.intersectAttrs lhs.specialArgs rhs.specialArgs;
             in if intersecting == {}
             then lhs.specialArgs // rhs.specialArgs
-            else debugThrow "A submoduleWith' option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
+            else throw "A submoduleWith' option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
           shorthandOnlyDefinesConfig =
             if lhs.shorthandOnlyDefinesConfig == null
             then rhs.shorthandOnlyDefinesConfig
@@ -304,7 +330,7 @@ let
             then lhs.shorthandOnlyDefinesConfig
             else if lhs.shorthandOnlyDefinesConfig == rhs.shorthandOnlyDefinesConfig
             then lhs.shorthandOnlyDefinesConfig
-            else debugThrow "A submoduleWith' option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
+            else throw "A submoduleWith' option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
           description =
             if lhs.description == null
             then rhs.description
@@ -312,7 +338,7 @@ let
             then lhs.description
             else if lhs.description == rhs.description
             then lhs.description
-            else debugThrow "A submoduleWith' option is declared multiple times with conflicting descriptions";
+            else throw "A submoduleWith' option is declared multiple times with conflicting descriptions";
         };
       };
     };
@@ -324,29 +350,27 @@ let
     check = x: builtins.any (type: type.check x) types && chk x;
     nestedTypes = builtins.listToAttrs (lib.imap0 (i: x: { name = toString i; value = x; }) types);
     typeMerge = null;
-    merge = loc: defs: lib.trace "merging"
+    merge = loc: defs:
       (let
         res = builtins.foldl'
           (x: type: if x != null then x else
-            let val = lib.trace "a" builtins.tryEval (type.merge loc defs);
+            let val = builtins.tryEval (type.merge loc defs);
             in if val.success then val.value else x)
           null
           (builtins.filter (type: builtins.all ({ value, ... }: let ret = type.check value; in ret) defs) types);
       in
         if res == null
-        then debugThrow "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
+        then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
         else res);
   };
 
-  debugThrow = s: /*assert s == (lib.traceVal s);*/ (throw s); # assert false; lib.trace s s.aiwddmowdim;
-
-  stringLike = lib.types.str; /*lib.mkOptionType {
+  stringLike = lib.mkOptionType {
     name = "stringLike";
     description = "string";
     descriptionClass = "noun";
     check = s: builtins.isString s || s?__toString;
     merge = loc: defs: toString (lib.options.mergeEqualOption loc defs);
-  };*/
+  };
 
   types =
     # create "name type". Name type is anything that can receive either a name as a literal string or an attrset
@@ -358,7 +382,7 @@ let
       description = "${description}";
       descriptionClass = "noun";
       check = x: (builtins.isString x && (!addAt || lib.hasPrefix "@" x)) || (builtins.isAttrs x && x?name);
-      merge = loc: defs: lib.trace "merging" lib.mergeOneOption loc (map (def@{ value, ... }: def // {
+      merge = loc: defs: lib.mergeOneOption loc (map (def@{ value, ... }: def // {
         value =
           if builtins.isAttrs value then (if addAt then "@${value.name}" else value.name)
           else toString value;
@@ -378,7 +402,7 @@ let
         in if strictEnums then chk
         else if laxEnums then (x: builtins.isString x || (builtins.isAttrs x && x?__toString))
         else (x: builtins.elem x (builtins.attrNames enum) || chk x);
-      merge = loc: defs: lib.trace "merging enum:" lib.traceVal (lib.mergeOneOption loc (map (def: def // {
+      merge = loc: defs: (lib.mergeOneOption loc (map (def: def // {
         value = toString def.value;
       }) defs));
     };
@@ -1143,7 +1167,7 @@ let
         builtins.isInt x
         || (if strictEnums then builtins.elem x (builtins.attrValues priorities)
             else builtins.elem x (builtins.attrNames priorities) || builtins.elem x (builtins.attrValues priorities));
-      merge = loc: defs: lib.trace "merging" lib.mergeOneOption loc (map (def: def // {
+      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
         value = if builtins.isInt def.value then def.value else toString def.value;
       }) defs);
     };
@@ -1319,8 +1343,8 @@ let
     };
     tableToDelete = mkTableType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "One of handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "One of handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" ];
       withHandle = true;
@@ -1340,26 +1364,26 @@ let
             builtins.any (k: builtins.elem k baseDetect) (builtins.attrNames x)
             && builtins.any (k: !x?${k}) reqBase'
           then
-            debugThrow "Base chains ${
+            throw "Base chains ${
               if x.family or "" == "netdev" then "in the netdev family " else ""
             }must have fields ${builtins.concatStringsSep ", " (map (s: "`${s}`") reqBase')} set"
           else if x.family or "" != "netdev" && x?dev then
-            debugThrow "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
+            throw "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
           else if x?family && info.families or null != null && !(builtins.elem x.family info.families) then
-            debugThrow "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
+            throw "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
           else if x?hook && info.hooks or null != null && !(builtins.elem x.hook info.hooks) then
-            debugThrow "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
+            throw "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
           else if x?hook && familyInfo.hooks or null != null && !(builtins.elem x.hook familyInfo.hooks) then
-            debugThrow "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
+            throw "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
           else
             x // (if builtins.isString (x.prio or null) then
               let
                 prioInfo = priorities.${x.prio};
               in
                 (if x?family && prioInfo.families or null != null && !(builtins.elem x.family prioInfo.families) then
-                  debugThrow "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
+                  throw "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
                 else if x?hook && prioInfo.hooks or null != null && !(builtins.elem x.hook prioInfo.hooks) then
-                  debugThrow "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
+                  throw "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
                 else {
                   prio = prioInfo.value (x.family or "");
                 })
@@ -1369,8 +1393,8 @@ let
     };
     chainToDelete = mkChainType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       reqFields = [ "family" "table" ];
@@ -1408,8 +1432,8 @@ let
     };
     setToDelete = mkSetType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       isMap = false;
@@ -1427,8 +1451,8 @@ let
     };
     mapToDelete = mkSetType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       isMap = true;
@@ -1473,8 +1497,8 @@ let
     };
     flowtableToDelete = mkFlowtableType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1489,8 +1513,8 @@ let
     };
     counterToDelete = mkCounterType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1504,8 +1528,8 @@ let
     };
     quotaToDelete = mkQuotaType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1519,8 +1543,8 @@ let
     };
     secmarkToDelete = mkSecmarkType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1541,8 +1565,8 @@ let
     };
     limitToDelete = mkLimitType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1556,8 +1580,8 @@ let
     };
     ctTimeoutToDelete = mkCtTimeoutType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1571,8 +1595,8 @@ let
     };
     ctExpectationToDelete = mkCtExpectationType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1586,8 +1610,8 @@ let
     };
     synproxyToDelete = mkSynproxyType {
       finalMerge = x:
-        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1699,7 +1723,7 @@ let
       name = "null";
       descriptionClass = "noun";
       check = x: x == null;
-      merge = loc: defs: lib.trace "merging" null;
+      merge = loc: defs: null;
       emptyValue = { value = null; };
     };
     listCommand = oneOf' {
@@ -1869,7 +1893,7 @@ let
             (isValidExpr CTX_F_MANGLE key && isValidExpr CTX_F_STMT value)
             "Mangle statements' expressions are invalid in this context";
           ret
-        else debugThrow ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
+        else throw ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
 
       options.key = lib.mkOption {
         type = types.expression;
@@ -1881,7 +1905,7 @@ let
       };
     };
     quotaStatement = submodule' {
-      finalMerge = x: if x?used_unit && !x?used then debugThrow "If quota stmt has used_unit, must specify used as well" else x;
+      finalMerge = x: if x?used_unit && !x?used then throw "If quota stmt has used_unit, must specify used as well" else x;
       options.val = lib.mkOption {
         type = lib.types.int;
         description = "Quota value.";
@@ -1907,7 +1931,7 @@ let
       };
     };
     limitStatement = submodule' {
-      finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then debugThrow "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
+      finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then throw "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
       options.rate = lib.mkOption {
         type = lib.types.int;
         description = "Rate value to limit to.";
@@ -1942,7 +1966,7 @@ let
     fwdStatement = submodule' {
       finalMerge = { dev, ... } @ ret:
         if (ret?family && !ret?addr) || (ret?addr && !ret?family)
-        then debugThrow "If at least one of `addr` or `family` is given, both must be present."
+        then throw "If at least one of `addr` or `family` is given, both must be present."
         else assert lib.assertMsg
           (isValidExpr CTX_F_STMT dev && (!ret?addr || isValidExpr CTX_F_STMT ret.addr))
           "Fwd statement's expressions are invalid in this context"; ret;
@@ -2025,7 +2049,7 @@ let
     rejectStatement = submodule' {
       finalMerge = ret:
         if ret.expr or null != null && ret.type or null == "tcp reset"
-        then debugThrow "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`"
+        then throw "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`"
         else assert lib.assertMsg
           (!ret?expr || isImmediateExpr ret.expr)
           "Reject statement's expression is invalid in this context";
@@ -2414,11 +2438,11 @@ let
       };
     };
     namedPayloadExpression = submodule' {
-      finalMerge = { protocol, field }@ret: lib.trace field lib.trace protocol (let
+      finalMerge = { protocol, field }@ret: (let
         inherit (payloadProtocols.${protocol} or {}) fields;
       in
-        if laxEnums || fields?${field} then lib.trace "done" ret
-        else debugThrow "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}");
+        if laxEnums || fields?${field} then ret
+        else throw "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}");
       skipNulls = false;
       options.protocol = lib.mkOption {
         description = "Payload reference packet header protocol.";
@@ -2440,11 +2464,11 @@ let
       in
       if laxEnums || !ret?field || fields?${ret.field}
       then
-        (if ret?field && ret?offset then debugThrow "Only one of field and offset of exthdr may be true"
-        else if !ret?offset && ret.name == "rt0" then debugThrow "Must have offset specified with exthdr rt0"
-        else if ret?offset && ret.name != "rt0" then debugThrow "Must not have offset specified with any exthdr other than rt0"
+        (if ret?field && ret?offset then throw "Only one of field and offset of exthdr may be true"
+        else if !ret?offset && ret.name == "rt0" then throw "Must have offset specified with exthdr rt0"
+        else if ret?offset && ret.name != "rt0" then throw "Must not have offset specified with any exthdr other than rt0"
         else ret)
-      else debugThrow "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
+      else throw "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "IPv6 extension header name.";
         type = types.exthdr;
@@ -2478,7 +2502,7 @@ let
         inherit (tcpOptions.${name}) fields;
       in
         if laxEnums || !ret?field || fields?${ret.field} then ret
-        else debugThrow "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
+        else throw "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "TCP option name.";
         type = types.tcpOption;
@@ -2498,7 +2522,7 @@ let
         inherit (ipOptions.${name}) fields;
       in
         if laxEnums || !ret?field || fields?${ret.field} then ret
-        else debugThrow "IP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
+        else throw "IP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "IP option header name.";
         type = types.ipOption;
@@ -2513,7 +2537,7 @@ let
         inherit (sctpChunks.${name}) fields;
       in
         if laxEnums || !ret?field || fields?${ret.field} then ret
-        else debugThrow "SCTP chunk ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
+        else throw "SCTP chunk ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "SCTP chunk name.";
         type = types.sctpChunk;
@@ -2546,11 +2570,11 @@ let
         dir = info.dir or null;
         # family = info.family or null;
       in
-        if dir == true && !ret?dir then debugThrow "You must provide a direction for CT key ${key}."
-        else if dir == false && ret?dir then debugThrow "You must not provide a direction for CT key ${key}."
+        if dir == true && !ret?dir then throw "You must provide a direction for CT key ${key}."
+        else if dir == false && ret?dir then throw "You must not provide a direction for CT key ${key}."
         # else if family == true && !ret?family then throw "You must provide an IP family for CT key ${key}."
         # else if family == false && ret?family then throw "You must not provide an IP family for CT key ${key}."
-        else if ret?family then debugThrow "Look, I know that you might expect that ct expressions have a property \"family\" - I wouldn't blame you, given that the official docs explain what it does... but actually inside the code it has absolutely no effect. Instead, you have to do this - specify \"ip saddr\" or \"ip6 saddr\" instead of \"saddr\", same for \"daddr\"."
+        else if ret?family then throw "Look, I know that you might expect that ct expressions have a property \"family\" - I wouldn't blame you, given that the official docs explain what it does... but actually inside the code it has absolutely no effect. Instead, you have to do this - specify \"ip saddr\" or \"ip6 saddr\" instead of \"saddr\", same for \"daddr\"."
         else ret;
       options.key = lib.mkOption {
         description = "CT key";
@@ -2570,8 +2594,8 @@ let
         info = ctKeys.${key} or {};
         needsFamily = info.needsFamily or false;
       in
-        if needsFamily && !ret?family then debugThrow "You must provide a family for IPSec key ${key}"
-        else if (ret.spnum or 0) > 255 then debugThrow "Max spnum allowed is 255"
+        if needsFamily && !ret?family then throw "You must provide a family for IPSec key ${key}"
+        else if (ret.spnum or 0) > 255 then throw "Max spnum allowed is 255"
         else ret;
       options.key = lib.mkOption {
         description = "Undocumented upstream";
@@ -2645,9 +2669,9 @@ let
           iif = builtins.elem "iif" flags;
           oif = builtins.elem "oif" flags;
         in
-          if saddr && daddr then debugThrow "Only one flag out of saddr/daddr may be set in fib"
-          else if !saddr && !daddr then debugThrow "One flag out of saddr/daddr must be set in fib"
-          else if iif && oif then debugThrow "At most one one flag out of iif/oif may be set in fib"
+          if saddr && daddr then throw "Only one flag out of saddr/daddr may be set in fib"
+          else if !saddr && !daddr then throw "One flag out of saddr/daddr must be set in fib"
+          else if iif && oif then throw "At most one one flag out of iif/oif may be set in fib"
           else fib;
       skipNulls = false;
       options.result = lib.mkOption {
@@ -2888,7 +2912,7 @@ let
   # __toString to a func that returns the element name, and takes enum's attrs for the rest
   mkEnum = name: attrs: let self = builtins.mapAttrs (k: v: (v // {
     __enumName__ = name;
-    __enum__ = self;
+    # __enum__ = self;
     __value__ = k;
     __toString = self: k;
   })) attrs; in self;
@@ -3323,7 +3347,7 @@ let
       ackseq = integer 32;
       doff = integer 4;
       reserved = integer 4;
-      flags = integer 8;
+      flags = tcp_flag;
       window = integer 16;
       checksum = integer 16;
       urgptr = integer 16;
@@ -3392,7 +3416,7 @@ let
         (builtins.attrValues payloadProtocols))));
   exthdrs = with nftTypes; mkEnum "exthdrs" {
     hbh.fields = {
-      nexthdr = integer 8;
+      nexthdr = inet_proto;
       hdrlength = integer 8;
     };
     rt2.fields = { };
@@ -3608,6 +3632,8 @@ let
     ge = operators'.">=";
     IN = operators'."in";
     in' = operators'."in";
+    auto = operators."in";
+    au = operators."in";
     implicit = operators'."in";
   };
   flowtableOps = mkEnum "flowOps" {
@@ -3799,7 +3825,7 @@ let
     home-agent-switch-message.value = 12;
   };
   # inet_proto, the type of meta ip protocol/meta ip6 nexthdr/etc
-  inetProtos = mkEnum "inet_proto" {
+  inetProtos' = mkEnum "inet_proto" {
     hopopt.value = 0;
     icmp.value = 1;
     igmp.value = 2;
@@ -3935,6 +3961,9 @@ let
     ethernet.value = 143;
     aggfrag.value = 144;
   };
+  inetProtos = inetProtos' // {
+    icmpv6 = inetProtos'.ipv6-icmp;
+  };
   icmpCodes = mkEnum "icmp_code" {
     net-unreachable.value = 0;
     host-unreachable.value = 1;
@@ -4051,7 +4080,7 @@ in rec {
       sctpChunkFields sctpChunks setFlags setOperations setPolicies setReference socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
       udpConnectionStates wildcard xtTypes;
-    inherit exprEnums exprEnumsRec innerExprs innerExprsRec;
+    inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums;
     dccpPkttypes = dccpPktTypes;
     # "time to lives" doesn't sound good but add an alias anyway for consistency
     osfTtls = osfTtl;
