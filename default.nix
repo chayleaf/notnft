@@ -201,7 +201,14 @@ let
     builtins.concatMap exprEnums (innerExprsRec expr);
 
   mergeEnums = allEnums:
-    lib.filterAttrs (k: v: v != null) (builtins.zipAttrsWith (name: values: if builtins.length values == 1 then builtins.head values else null) (lib.unique allEnums));
+    lib.filterAttrs (k: v: v != null)
+      (builtins.zipAttrsWith
+        (name: values:
+          if builtins.length values == 1
+          then builtins.head values
+          # if more than one enum has this value, simply pass the name
+          else name)
+        (lib.unique allEnums));
 
   # warning: expr may not yet be merged
   exprEnumsMerged = expr: mergeEnums (exprEnumsRec expr);
