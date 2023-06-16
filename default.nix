@@ -129,6 +129,7 @@ let
   exprEnums = expr:
     lib.trace expr (if builtins.isList expr then builtins.concatMap exprEnums expr
     else if !(builtins.isAttrs expr) then []
+    else if expr?__expr__ then exprEnums expr.__expr__
     else if expr?__enumName__ && nftTypes?${expr.__enumName__}.enum then [ nftTypes.${expr.__enumName__}.enum ]
     else if builtins.length (builtins.attrNames expr) != 1 then []
     else let key = builtins.head (builtins.attrNames expr); val = expr.${key}; in {

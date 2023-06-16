@@ -1,3 +1,4 @@
+# disable convenience functors in test to allow serializing intermediate state to json
 { lib, notnft }:
 
 let
@@ -23,16 +24,22 @@ let
     (if isArgs x then builtins.foldl' lib.id (self ((args x) // attrs)) added
     else takeArgs' (added ++ [x]) self attrs);
   takeArgs = takeArgs' [];
+  fixupStmts = stmts:
+    if builtins.isList stmts then map fixupStmts stmts
+    else if !(builtins.isAttrs stmts) then stmts
+    else if stmts?__expr__ then stmts.__expr__
+    else if builtins.any (lib.hasPrefix "_") (builtins.attrNames stmts) then stmts
+    else builtins.mapAttrs (k: fixupStmts) stmts;
 self = rec {
   # this DSL works by returning attrsets if all info is known, and functions if they expect more attrs
   # compile just extracts the list from the dsl
   compile = x: toList x;
-  ruleset = x: { nftables = passNames x; };
-  table = { family ? null, name ? null } @ attrs':
+  Ruleset = x: { nftables = passNames x; };
+  Table = { family ? null, name ? null } @ attrs':
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?name || !attrs?family then takeArgs table attrs
+    if !attrs?name || !attrs?family then takeArgs Table attrs
     else special {
       __list__ = [ { add.table = attrs; } ];
       __functor = self: obj:
@@ -40,7 +47,7 @@ self = rec {
           __list__ = self.__list__ ++ (passNamesAnd { table = name; inherit family; } obj);
         };
     };
-  chain' = {
+  Chain' = {
     family ? null
     , table ? null
     , name ? null
@@ -62,7 +69,7 @@ self = rec {
       prio = prio (builtins.mapAttrs (k: v: v.value (toString family))
         (lib.filterAttrs (k: v: (!v?families || builtins.elem (toString family) v.families) && (!v?hooks || builtins.elem (toString hook) v.hooks)) notnft.priorities));
     } else {}); in
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs chain' attrs
+    if !attrs?name || !attrs?family || !attrs?table then takeArgs Chain' attrs
     else {
       __list__ = [ { add.chain = attrs; } ];
       __functor = self: obj:
@@ -71,13 +78,13 @@ self = rec {
           __list__ =
             let obj' =
               if builtins.isList obj
-              then builtins.foldl' lib.id (rule' { chain = name; inherit family table; }) obj
+              then builtins.foldl' lib.id (Rule' { chain = name; inherit family table; }) obj
               else obj;
             in self.__list__ ++ (passInfo obj' { chain = name; inherit family table; });
         };
     };
-  chain = chain' {};
-  rule' = {
+  Chain = Chain' {};
+  Rule' = {
     family ? null
     , table ? null
     , chain ? null
@@ -86,18 +93,18 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?chain || !attrs?family || !attrs?table then takeArgs rule' attrs
+    if !attrs?chain || !attrs?family || !attrs?table then takeArgs Rule' attrs
     else {
       add.rule = attrs; 
       __functor = self: obj:
         self // {
           add.rule = self.add.rule // {
-            expr = (self.add.rule.expr or []) ++ (toList obj);
+            expr = (self.add.rule.expr or []) ++ (toList (fixupStmts obj));
           };
         };
       };
-  rule = rule' {};
-  set = {
+  Rule = Rule' {};
+  Set = {
     family ? null
     , table ? null
     , name ? null
@@ -124,7 +131,7 @@ self = rec {
       enums = builtins.filter (x: x != null) (map (x: notnft.nftType.${x}.enum or null) typeStrs);
       enum = notnft.mergeEnums enums;
     in
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs set attrs
+    if !attrs?name || !attrs?family || !attrs?table then takeArgs Set attrs
     else {
       add.set = attrs;
       __functor = self: obj':
@@ -134,7 +141,7 @@ self = rec {
           };
         };
     };
-  map = {
+  Map = {
     family ? null
     , table ? null
     , name ? null
@@ -164,7 +171,7 @@ self = rec {
           };
         };
       };
-  flowtable = {
+  Flowtable = {
     family ? null
     , table ? null
     , name ? null
@@ -175,9 +182,9 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs flowtable attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs Flowtable attrs
     else special { add.flowtable = attrs; };
-  counter = {
+  Counter = {
     family ? null
     , table ? null
     , name ? null
@@ -187,9 +194,9 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs counter attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs Counter attrs
     else special { add.counter = attrs; };
-  quota = {
+  Quota = {
     family ? null
     , table ? null
     , name ? null
@@ -200,9 +207,9 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs quota attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs Quota attrs
     else special { add.quota = attrs; };
-  "ct helper" = {
+  "Ct helper" = {
     family ? null
     , table ? null
     , name ? null
@@ -213,9 +220,10 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct helper" attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct helper" attrs
     else special { add."ct helper" = attrs; };
-  limit = {
+  CtHelper = self."Ct helper";
+  Limit = {
     family ? null
     , table ? null
     , name ? null
@@ -228,9 +236,9 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs limit attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs Limit attrs
     else special { add.limit = attrs; };
-  "ct timeout" = {
+  "Ct timeout" = {
     family ? null
     , table ? null
     , name ? null
@@ -242,9 +250,10 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct timeout" attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct timeout" attrs
     else special { add."ct timeout" = attrs; };
-  "ct expectation" = {
+  CtTimeout = self."Ct timeout";
+  "Ct expectation" = {
     family ? null
     , table ? null
     , name ? null
@@ -257,8 +266,9 @@ self = rec {
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."ct expectation" attrs
+    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct expectation" attrs
     else special { add."ct expectation" = attrs; };
+  CtExpectation = self."Ct expectation";
   match = builtins.mapAttrs (_: op: left: right: {
     match = {
       inherit op left;
@@ -270,12 +280,10 @@ self = rec {
   }) notnft.operators;
   is = match;
   ct = builtins.mapAttrs (_: key: {
-    ct.key = key;
-  }) notnft.ctKeys;
-  ct' = builtins.mapAttrs (_: key: { family ? null, dir ? null } @ attrs: {
-    ct = {
-      inherit key;
-    } // attrs;
+    __expr__.ct.key = key;
+    __functor = self: attrs: {
+      ct = self.ct // attrs;
+    };
   }) notnft.ctKeys;
   payload = builtins.mapAttrs
     (_: proto:
@@ -298,13 +306,11 @@ self = rec {
       })
     notnft.tcpOptions;
     op = lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: a:
-      if builtins.isList a && builtins.length a >= 2 then builtins.foldl' (old: new: {
-        ${op} = [ old new ];
+      if builtins.isList a && builtins.length a >= 2 then builtins.foldl' (a: b: {
+        ${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
       }) (builtins.head a) (builtins.tail a)
-      else b: if builtins.isFunction b then {
-        ${op} = [ a (b (notnft.exprEnumsMerged a)) ];
-      } else {
-        ${op} = [ a b ];
+      else b: {
+        ${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
       });
   meta = builtins.mapAttrs (_: key: {
     meta.key = key;
@@ -324,15 +330,19 @@ self = rec {
         let result = if builtins.isFunction result' then result' notnft.fibResults else result'; in
         { fib = { inherit flags result; }; };
   # anonymous set
-  set' = x: { set = x; };
-  limit' = attrs @ { per ? null, ... }: {
+  set = x: { set = x; };
+  limit = attrs @ { per ? null, ... }: {
     limit = attrs // (if builtins.isFunction per then {
       per = per notnft.timeUnits;
     } else {});
   };
   cidr = addr: len: { prefix = { inherit addr len; }; };
-  masquerade = { masquerade = {}; };
-  masquerade' = attrs: { masquerade = attrs; };
+  masquerade = {
+    __expr__.masquerade = { };
+    __functor = self: attrs: {
+      masquerade = self.masquerade // attrs;
+    };
+  };
   vmap = key: data: {
     vmap = {
       inherit key;
@@ -340,4 +350,5 @@ self = rec {
     };
   };
   mangle = key: value: { mangle = { inherit key value; }; };
+  inherit (notnft) exists missing;
 }; in self
