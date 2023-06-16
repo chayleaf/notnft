@@ -218,13 +218,12 @@ self = rec {
   }) notnft.ctKeys;
   payload = builtins.mapAttrs
     (_: proto:
-      (builtins.listToAttrs (builtins.map (field: {
-        name = field;
-        value.payload = {
+      (builtins.mapAttrs (field: _: {
+        payload = {
           protocol = proto;
           field = notnft.payloadFields.${field};
         };
-      }) proto.__info__.fields)))
+      }) proto.fields))
     notnft.payloadProtocols;
   tcpOpt = builtins.mapAttrs
     (_: opt:
@@ -234,7 +233,7 @@ self = rec {
           name = opt;
           field = notnft.tcpOptionFields.${field};
         };
-      }) opt.__info__.fields)) // {
+      }) opt.fields)) // {
         __expr__."tcp option".name = opt;
       })
     notnft.tcpOptions;

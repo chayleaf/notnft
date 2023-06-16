@@ -53,7 +53,7 @@ in rec {
     else if x?"ip option" then "ip option ${x."ip option".name}"
     else if x?"sctp chunk".field then "sctp chunk ${x."sctp chunk".name} ${x."sctp chunk".field}"
     else if x?"sctp chunk" then "sctp chunk ${x."sctp chunk".name}"
-    else if x?meta && ((notnft.metaKeys.${x.meta.key}.__info__ or {}).unqualified or false) then x.meta.key
+    else if x?meta && (notnft.metaKeys.${x.meta.key}.unqualified or false) then x.meta.key
     else if x?meta then "meta ${x.meta.key}"
     else if x?rt then optCat [ "rt" (x.rt.family or null) x.rt.key ]
     else if x?ct then optCat [ "ct" (x.ct.dir or null) (x.ct.family or null) x.ct.key ]

@@ -18,7 +18,7 @@ let
   }).config.val;
   in
     # assert lib.assertMsg val.success "Invalid type for ${builtins.toJSON expr}";
-    lib.assertMsg (if json then builtins.toJSON val == builtins.toJSON expected else val == expected) "Invalid value for ${builtins.toJSON expr} (got ${builtins.toJSON val}, expected ${builtins.toJSON expected})";
+    lib.assertMsg (if json then builtins.toJSON (lib.trace "evaluating val" val) == builtins.toJSON (lib.trace "evaluating exp" expected) else val == expected) "Invalid value for ${builtins.toJSON expr} (got ${builtins.toJSON val}, expected ${builtins.toJSON expected})";
   chkTypeEq = chkTypeEq' false;
   chkTypeJson' = chkTypeEq' true;
   # check that `x` is an expression and the merged value equals `x`
@@ -32,7 +32,7 @@ let
   # check that the second arg is an expression and the merged value equals the first arg
   chkExprEq = chkTypeEq types.expression;
   # check that evaluation of `x` fails
-  fails = x: !(builtins.tryEval x).success;
+  fails = x: !(lib.trace "a" builtins.tryEval x).success;
 
   chkCommand = x: chkTypeEq' true types.command x x;
   removeAll = attrs: builtins.mapAttrs (k: v: builtins.removeAttrs v attrs);
@@ -58,6 +58,7 @@ let
 
 in
 
+assert chkExprJson { payload = { protocol = flake.payloadProtocols.udp; field = flake.payloadFields.vtag; }; };
 ### EXPRESSIONS
 # primitives
 assert chkExpr "";
@@ -91,10 +92,10 @@ assert chkExprJson { payload = { base = flake.payloadBases.nh; offset = 5; len =
 assert chkExpr { payload = { base = "ll"; offset = 5; len = 6; }; };
 assert chkExpr { payload = { protocol = "tcp"; field = "sport"; }; };
 assert chkExprJson { payload = { protocol = flake.payloadProtocols.udp; field = flake.payloadFields.length; }; };
-assert fails (chkExpr { payload = { protocol = "tcp"; field = "basketball"; }; });
-assert fails (chkExpr { payload = { protocol = flake.payloadProtocols.udp; field = flake.payloadFields.vtag; }; });
+assert fails (chkExprJson { payload = { protocol = "tcp"; field = "basketball"; }; });
+assert fails (chkExprJson { payload = { protocol = flake.payloadProtocols.udp; field = flake.payloadFields.vtag; }; });
 # exthdr expr
-assert chkExpr { exthdr = { name = "hbh"; }; };
+assert chkExprJson { exthdr = { name = "hbh"; }; };
 assert chkExprJson { exthdr = { name = flake.exthdrs.rt0; offset = 5; }; };
 assert chkExprJson { exthdr = { name = flake.exthdrs.srh; field = flake.exthdrFields.tag; }; };
 assert fails (chkExprJson { exthdr = { name = flake.exthdrs.hbh; offset = 5; }; });

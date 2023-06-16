@@ -102,6 +102,84 @@ let
         hasAllBits ctx (contexts.${key} or CTX_F_ALL)
         && (extraChecks.${key} or (expr: true)) expr.${key};
 
+  # get all expressions contained in an expression (non-recursive)
+  innerExprs = expr:
+    if builtins.isList expr then expr
+    else if !(builtins.isAttrs expr) then []
+    else if builtins.length (builtins.attrNames expr) != 1 then []
+    else if expr?map then [ expr.map.key expr.map.data ]
+    else lib.toList (expr.jhash.expr or expr."|" or expr."&" or expr."^" or expr."<<" or expr.">>" or expr.concat or expr.prefix or expr.range or expr.set or expr.elem.val);
+
+  # get the expr plus all of its inner exprs, recursively
+  innerExprsRec = expr: [ expr ] ++ (map innerExprsRec (innerExprs expr));
+
+  # get all enums appropriate for the expression (might have duplicates), or empty list
+  # specifically, this is used when passed a closure in the DSL for RHS of an operation
+  exprEnums = expr:
+    if builtins.isList expr then builtins.concatLists (map exprEnums expr)
+    else if !(builtins.isAttrs expr) then []
+    else if expr?__enumName__ && nftTypes?${expr.__enumName__}.enum then [ nftTypes.${expr.__enumName__}.enum ]
+    else if builtins.length (builtins.attrNames expr) != 1 then []
+    else let key = builtins.head (builtins.attrNames expr); val = expr.${key}; in {
+      # set = exprEnum val;
+      map = exprEnums val.key ++ exprEnums val.data;
+      # prefix = exprEnum val.addr;
+      # range = exprEnum val;
+      payload =
+        if val?base then []
+        else if !val?field then [ booleans ]
+        else if payloadProtocols?${val.protocol}.fields.${val.field}.enum then [ payloadProtocols.${val.protocol}.fields.${val.field}.enum ]
+        else [ ];
+      exthdr =
+        if !val?field then [ booleans ]
+        else if exthdrs?${val.name}.fields.${val.field}.enum then [ exthdrs.${val.name}.fields.${val.field}.enum ]
+        else [ ];
+      "tcp option" =
+        if val?base then []
+        else if !val?field then [ booleans ]
+        else if tcpOptions?${val.name}.fields.${val.field}.enum then [ tcpOptions.${val.name}.fields.${val.field}.enum ]
+        else [ ];
+      "ip option" =
+        if !val?field then [ booleans ]
+        else if ipOptions?${val.name}.fields.${val.field}.enum then [ ipOptions.${val.name}.fields.${val.field}.enum ]
+        else [ ];
+      "sctp chunk" =
+        if !val?field then [ booleans ]
+        else if sctpChunks?${val.name}.fields.${val.field}.enum then [ sctpChunks.${val.name}.fields.${val.field}.enum ]
+        else [ ];
+      meta =
+        if metaKeys?${val.key}.type.enum then [ metaKeys.${val.key}.type.enum ]
+        else [ ];
+      # osf = [ ]; returns a string
+      # ipsec = [ ]; returns int/ipv4/ipv6 depending on params
+      # can return other stuff too
+      socket =
+        if val.key == "transparent" || val.key == "wildcard" then [ booleans ]
+        else [ ];
+      # returns realm/ipv4/ipv6/int/bool
+      rt = if val.key == "ipsec" then [ booleans ] else [ ];
+      ct = lib.toList ({
+        state = ctStates;
+        direction = ctDirs;
+        status = ctStatuses;
+        l3proto = nfProtos;
+      }.${val.key} or []);
+      # numgen = [ ];
+      # jhash = [ ];
+      # symhash = [ ];
+      fib = lib.toList ({ type = fibAddrTypes; }.${val.result} or []);
+      "|" = exprEnums val;
+      "^" = exprEnums val;
+      "&" = exprEnums val;
+      ">>" = exprEnums val;
+      "<<" = exprEnums val;
+      elem = exprEnums val.val;
+    }.${key};
+
+  # get all enums appropriate for the expression (might have duplicates), or empty list
+  exprEnumsRec = expr:
+    builtins.concatMap exprEnums (innerExprsRec expr);
+
   # this is a customized version of lib.types.submodule
   # - advantages:
   #   - a custom merge functions can be applied at the end, for doing some final checks and fixups
@@ -181,7 +259,7 @@ let
         else freeformType.description or name;
       check = x: builtins.isAttrs x && chk x;
       merge = loc: defs:
-        finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
+        lib.trace "merging" finalMerge ((if skipNulls then lib.filterAttrs (k: v: !(builtins.isNull v)) else lib.id) (base.extendModules {
           modules = [ { _module.args.name = lib.last loc; } ] ++ allModules defs;
           prefix = loc;
         }).config);
@@ -212,13 +290,13 @@ let
             if lhs.class or null == null then rhs.class or null
             else if rhs.class or null == null then lhs.class or null
             else if lhs.class or null == rhs.class then lhs.class or null
-            else throw "A submoduleWith' option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
+            else debugThrow "A submoduleWith' option is declared multiple times with conflicting class values \"${toString lhs.class}\" and \"${toString rhs.class}\".";
           modules = lhs.modules ++ rhs.modules;
           specialArgs =
             let intersecting = builtins.intersectAttrs lhs.specialArgs rhs.specialArgs;
             in if intersecting == {}
             then lhs.specialArgs // rhs.specialArgs
-            else throw "A submoduleWith' option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
+            else debugThrow "A submoduleWith' option is declared multiple times with the same specialArgs \"${toString (builtins.attrNames intersecting)}\"";
           shorthandOnlyDefinesConfig =
             if lhs.shorthandOnlyDefinesConfig == null
             then rhs.shorthandOnlyDefinesConfig
@@ -226,7 +304,7 @@ let
             then lhs.shorthandOnlyDefinesConfig
             else if lhs.shorthandOnlyDefinesConfig == rhs.shorthandOnlyDefinesConfig
             then lhs.shorthandOnlyDefinesConfig
-            else throw "A submoduleWith' option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
+            else debugThrow "A submoduleWith' option is declared multiple times with conflicting shorthandOnlyDefinesConfig values";
           description =
             if lhs.description == null
             then rhs.description
@@ -234,7 +312,7 @@ let
             then lhs.description
             else if lhs.description == rhs.description
             then lhs.description
-            else throw "A submoduleWith' option is declared multiple times with conflicting descriptions";
+            else debugThrow "A submoduleWith' option is declared multiple times with conflicting descriptions";
         };
       };
     };
@@ -246,19 +324,29 @@ let
     check = x: builtins.any (type: type.check x) types && chk x;
     nestedTypes = builtins.listToAttrs (lib.imap0 (i: x: { name = toString i; value = x; }) types);
     typeMerge = null;
-    merge = loc: defs:
-      let
+    merge = loc: defs: lib.trace "merging"
+      (let
         res = builtins.foldl'
           (x: type: if x != null then x else
-            let val = builtins.tryEval (type.merge loc defs);
+            let val = lib.trace "a" builtins.tryEval (type.merge loc defs);
             in if val.success then val.value else x)
           null
           (builtins.filter (type: builtins.all ({ value, ... }: let ret = type.check value; in ret) defs) types);
       in
         if res == null
-        then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
-        else res;
+        then debugThrow "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
+        else res);
   };
+
+  debugThrow = s: /*assert s == (lib.traceVal s);*/ (throw s); # assert false; lib.trace s s.aiwddmowdim;
+
+  stringLike = lib.types.str; /*lib.mkOptionType {
+    name = "stringLike";
+    description = "string";
+    descriptionClass = "noun";
+    check = s: builtins.isString s || s?__toString;
+    merge = loc: defs: toString (lib.options.mergeEqualOption loc defs);
+  };*/
 
   types =
     # create "name type". Name type is anything that can receive either a name as a literal string or an attrset
@@ -270,7 +358,7 @@ let
       description = "${description}";
       descriptionClass = "noun";
       check = x: (builtins.isString x && (!addAt || lib.hasPrefix "@" x)) || (builtins.isAttrs x && x?name);
-      merge = loc: defs: lib.mergeOneOption loc (map (def@{ value, ... }: def // {
+      merge = loc: defs: lib.trace "merging" lib.mergeOneOption loc (map (def@{ value, ... }: def // {
         value =
           if builtins.isAttrs value then (if addAt then "@${value.name}" else value.name)
           else toString value;
@@ -286,13 +374,13 @@ let
       inherit name description;
       descriptionClass = "noun";
       check =
-        let chk = x: builtins.isAttrs x && x?__toString && x?__value__ && x?__enum__ && (builtins.any (y: x.__value__ == y.__value__ && x.__enum__ == y.__enum__) (builtins.attrValues enum));
+        let chk = x: builtins.isAttrs x && x?__toString && x?__value__ && x?__enumName__ && (builtins.any (y: x.__value__ == y.__value__ && x.__enumName__ == y.__enumName__) (builtins.attrValues enum));
         in if strictEnums then chk
         else if laxEnums then (x: builtins.isString x || (builtins.isAttrs x && x?__toString))
         else (x: builtins.elem x (builtins.attrNames enum) || chk x);
-      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
+      merge = loc: defs: lib.trace "merging enum:" lib.traceVal (lib.mergeOneOption loc (map (def: def // {
         value = toString def.value;
-      }) defs);
+      }) defs));
     };
     mkTableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false }:
     let
@@ -940,7 +1028,7 @@ let
     keyType = mkEnum {
       name = "nftablesKeyType";
       description = "nftables key type";
-      enum = lib.filterAttrs (k: v: v.__info__.isKey or true) nftTypes;
+      enum = lib.filterAttrs (k: v: v.isKey or true) nftTypes;
     };
     type = mkEnum {
       name = "nftablesType";
@@ -955,7 +1043,7 @@ let
     ipFamily = mkEnum {
       name = "nftablesIpFamily";
       description = "nftables ip family";
-      enum = lib.filterAttrs (k: v: v.__info__.isIp or false) families;
+      enum = lib.filterAttrs (k: v: v.isIp or false) families;
     };
     chainType = mkEnum {
       name = "nftablesChainType";
@@ -1055,7 +1143,7 @@ let
         builtins.isInt x
         || (if strictEnums then builtins.elem x (builtins.attrValues priorities)
             else builtins.elem x (builtins.attrNames priorities) || builtins.elem x (builtins.attrValues priorities));
-      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
+      merge = loc: defs: lib.trace "merging" lib.mergeOneOption loc (map (def: def // {
         value = if builtins.isInt def.value then def.value else toString def.value;
       }) defs);
     };
@@ -1067,7 +1155,7 @@ let
     l3Proto = mkEnum {
       name = "nftablesL3Proto";
       description = "nftables layer 3 protocol";
-      enum = lib.filterAttrs (k: v: v.__info__.isL3 or false) families;
+      enum = lib.filterAttrs (k: v: v.isL3 or false) families;
     };
     timeUnit = mkEnum {
       name = "nftablesTimeUnit";
@@ -1077,7 +1165,7 @@ let
     byteUnit = mkEnum {
       name = "nftablesByteUnit";
       description = "nftables byte unit";
-      enum = lib.filterAttrs (k: v: !v.__info__?onlyRate) rateUnits;
+      enum = lib.filterAttrs (k: v: !v.onlyRate) rateUnits;
     };
     rateUnit = mkEnum {
       name = "nftablesRateUnit";
@@ -1231,8 +1319,8 @@ let
     };
     tableToDelete = mkTableType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "One of handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "One of handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" ];
       withHandle = true;
@@ -1244,34 +1332,34 @@ let
         let
           baseDetect = [ "type" "hook" "prio" "policy" "dev" ];
           reqBase = [ "type" "hook" "prio" "policy" ];
-          familyInfo = (families.${x.family or ""} or {}).__info__ or {};
+          familyInfo = families.${x.family or ""} or {};
           reqBase' = reqBase ++ (lib.optionals (familyInfo.requireBaseChainDevice or false) [ "dev" ]);
-          info = (chainTypes.${x.type or ""} or {}).__info__ or {};
+          info = chainTypes.${x.type or ""} or {};
         in
           if
             builtins.any (k: builtins.elem k baseDetect) (builtins.attrNames x)
             && builtins.any (k: !x?${k}) reqBase'
           then
-            throw "Base chains ${
+            debugThrow "Base chains ${
               if x.family or "" == "netdev" then "in the netdev family " else ""
             }must have fields ${builtins.concatStringsSep ", " (map (s: "`${s}`") reqBase')} set"
           else if x.family or "" != "netdev" && x?dev then
-            throw "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
+            debugThrow "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
           else if x?family && info.families or null != null && !(builtins.elem x.family info.families) then
-            throw "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
+            debugThrow "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
           else if x?hook && info.hooks or null != null && !(builtins.elem x.hook info.hooks) then
-            throw "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
+            debugThrow "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
           else if x?hook && familyInfo.hooks or null != null && !(builtins.elem x.hook familyInfo.hooks) then
-            throw "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
+            debugThrow "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
           else
             x // (if builtins.isString (x.prio or null) then
               let
-                prioInfo = priorities.${x.prio}.__info__;
+                prioInfo = priorities.${x.prio};
               in
                 (if x?family && prioInfo.families or null != null && !(builtins.elem x.family prioInfo.families) then
-                  throw "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
+                  debugThrow "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
                 else if x?hook && prioInfo.hooks or null != null && !(builtins.elem x.hook prioInfo.hooks) then
-                  throw "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
+                  debugThrow "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
                 else {
                   prio = prioInfo.value (x.family or "");
                 })
@@ -1281,8 +1369,8 @@ let
     };
     chainToDelete = mkChainType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       reqFields = [ "family" "table" ];
@@ -1320,8 +1408,8 @@ let
     };
     setToDelete = mkSetType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       isMap = false;
@@ -1339,8 +1427,8 @@ let
     };
     mapToDelete = mkSetType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       withHandle = true;
       isMap = true;
@@ -1385,8 +1473,8 @@ let
     };
     flowtableToDelete = mkFlowtableType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1401,8 +1489,8 @@ let
     };
     counterToDelete = mkCounterType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1416,8 +1504,8 @@ let
     };
     quotaToDelete = mkQuotaType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1431,8 +1519,8 @@ let
     };
     secmarkToDelete = mkSecmarkType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1453,8 +1541,8 @@ let
     };
     limitToDelete = mkLimitType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1468,8 +1556,8 @@ let
     };
     ctTimeoutToDelete = mkCtTimeoutType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1483,8 +1571,8 @@ let
     };
     ctExpectationToDelete = mkCtExpectationType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1498,8 +1586,8 @@ let
     };
     synproxyToDelete = mkSynproxyType {
       finalMerge = x:
-        if !x?handle && !x?name then throw "Handle or name to be deleted must be specified"
-        else if x?handle && x?name then throw "Only one of handle or name to be deleted must be specified"
+        if !x?handle && !x?name then debugThrow "Handle or name to be deleted must be specified"
+        else if x?handle && x?name then debugThrow "Only one of handle or name to be deleted must be specified"
         else x;
       reqFields = [ "family" "table" ];
       withHandle = true;
@@ -1611,7 +1699,7 @@ let
       name = "null";
       descriptionClass = "noun";
       check = x: x == null;
-      merge = loc: defs: null;
+      merge = loc: defs: lib.trace "merging" null;
       emptyValue = { value = null; };
     };
     listCommand = oneOf' {
@@ -1781,7 +1869,7 @@ let
             (isValidExpr CTX_F_MANGLE key && isValidExpr CTX_F_STMT value)
             "Mangle statements' expressions are invalid in this context";
           ret
-        else throw ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
+        else debugThrow ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
 
       options.key = lib.mkOption {
         type = types.expression;
@@ -1793,7 +1881,7 @@ let
       };
     };
     quotaStatement = submodule' {
-      finalMerge = x: if x?used_unit && !x?used then throw "If quota stmt has used_unit, must specify used as well" else x;
+      finalMerge = x: if x?used_unit && !x?used then debugThrow "If quota stmt has used_unit, must specify used as well" else x;
       options.val = lib.mkOption {
         type = lib.types.int;
         description = "Quota value.";
@@ -1819,7 +1907,7 @@ let
       };
     };
     limitStatement = submodule' {
-      finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then throw "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
+      finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then debugThrow "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
       options.rate = lib.mkOption {
         type = lib.types.int;
         description = "Rate value to limit to.";
@@ -1854,7 +1942,7 @@ let
     fwdStatement = submodule' {
       finalMerge = { dev, ... } @ ret:
         if (ret?family && !ret?addr) || (ret?addr && !ret?family)
-        then throw "If at least one of `addr` or `family` is given, both must be present."
+        then debugThrow "If at least one of `addr` or `family` is given, both must be present."
         else assert lib.assertMsg
           (isValidExpr CTX_F_STMT dev && (!ret?addr || isValidExpr CTX_F_STMT ret.addr))
           "Fwd statement's expressions are invalid in this context"; ret;
@@ -1937,7 +2025,7 @@ let
     rejectStatement = submodule' {
       finalMerge = ret:
         if ret.expr or null != null && ret.type or null == "tcp reset"
-        then throw "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`"
+        then debugThrow "ICMP reject codes are only valid for rejections with type `icmp`/`icmpv6`/`icmpx`"
         else assert lib.assertMsg
           (!ret?expr || isImmediateExpr ret.expr)
           "Reject statement's expression is invalid in this context";
@@ -2310,7 +2398,8 @@ let
         type = lib.types.int;
       };
     };
-    rawPayloadExpression = lib.types.submodule {
+    rawPayloadExpression = submodule' {
+      skipNulls = false;
       options.base = lib.mkOption {
         description = "Payload base.";
         type = types.payloadBase;
@@ -2325,9 +2414,12 @@ let
       };
     };
     namedPayloadExpression = submodule' {
-      finalMerge = { protocol, field }@ret: let
-        inherit (payloadProtocols.${protocol}.__info__) fields;
-      in if laxEnums || builtins.elem field fields then ret else throw "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " fields}";
+      finalMerge = { protocol, field }@ret: lib.trace field lib.trace protocol (let
+        inherit (payloadProtocols.${protocol} or {}) fields;
+      in
+        if laxEnums || fields?${field} then lib.trace "done" ret
+        else debugThrow "Protocol ${protocol} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}");
+      skipNulls = false;
       options.protocol = lib.mkOption {
         description = "Payload reference packet header protocol.";
         type = types.payloadProtocol;
@@ -2344,15 +2436,15 @@ let
     };
     exthdrExpression = submodule' {
       finalMerge = { name, ... }@ret: let
-        inherit (exthdrs.${name}.__info__) fields;
+        inherit (exthdrs.${name} or {}) fields;
       in
-      if laxEnums || !ret?field || builtins.elem ret.field fields
+      if laxEnums || !ret?field || fields?${ret.field}
       then
-        (if ret?field && ret?offset then throw "Only one of field and offset of exthdr may be true"
-        else if !ret?offset && ret.name == "rt0" then throw "Must have offset specified with exthdr rt0"
-        else if ret?offset && ret.name != "rt0" then throw "Must not have offset specified with any exthdr other than rt0"
+        (if ret?field && ret?offset then debugThrow "Only one of field and offset of exthdr may be true"
+        else if !ret?offset && ret.name == "rt0" then debugThrow "Must have offset specified with exthdr rt0"
+        else if ret?offset && ret.name != "rt0" then debugThrow "Must not have offset specified with any exthdr other than rt0"
         else ret)
-      else throw "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+      else debugThrow "IPv6 extension header ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "IPv6 extension header name.";
         type = types.exthdr;
@@ -2383,14 +2475,16 @@ let
     };
     namedTcpOptionExpression = submodule' {
       finalMerge = { name, ... }@ret: let
-        inherit (tcpOptions.${name}.__info__) fields;
-      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+        inherit (tcpOptions.${name}) fields;
+      in
+        if laxEnums || !ret?field || fields?${ret.field} then ret
+        else debugThrow "TCP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
-        description = "TCP option header name.";
+        description = "TCP option name.";
         type = types.tcpOption;
       };
       options.field = mkNullOption {
-        description = lib.mdDoc "TCP option header field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
+        description = lib.mdDoc "TCP option field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
         type = types.tcpOptionField;
       };
     };
@@ -2401,8 +2495,10 @@ let
     };
     ipOptionExpression = submodule' {
       finalMerge = { name, ... }@ret: let
-        inherit (ipOptions.${name}.__info__) fields;
-      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "IP option ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+        inherit (ipOptions.${name}) fields;
+      in
+        if laxEnums || !ret?field || fields?${ret.field} then ret
+        else debugThrow "IP option ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "IP option header name.";
         type = types.ipOption;
@@ -2414,8 +2510,10 @@ let
     };
     sctpChunkExpression = submodule' {
       finalMerge = { name, ... }@ret: let
-        inherit (sctpChunks.${name}.__info__) fields;
-      in if laxEnums || !ret?field || builtins.elem ret.field fields then ret else throw "SCTP chunk ${name} only supports fields ${builtins.concatStringsSep ", " fields}";
+        inherit (sctpChunks.${name}) fields;
+      in
+        if laxEnums || !ret?field || fields?${ret.field} then ret
+        else debugThrow "SCTP chunk ${name} only supports fields ${builtins.concatStringsSep ", " (builtins.attrNames fields)}";
       options.name = lib.mkOption {
         description = "SCTP chunk name.";
         type = types.sctpChunk;
@@ -2444,15 +2542,15 @@ let
     };
     ctExpression = submodule' {
       finalMerge = { key, ... }@ret: let
-        info = (ctKeys.${key} or {}).__info__ or {};
+        info = ctKeys.${key} or {};
         dir = info.dir or null;
         # family = info.family or null;
       in
-        if dir == true && !ret?dir then throw "You must provide a direction for CT key ${key}."
-        else if dir == false && ret?dir then throw "You must not provide a direction for CT key ${key}."
+        if dir == true && !ret?dir then debugThrow "You must provide a direction for CT key ${key}."
+        else if dir == false && ret?dir then debugThrow "You must not provide a direction for CT key ${key}."
         # else if family == true && !ret?family then throw "You must provide an IP family for CT key ${key}."
         # else if family == false && ret?family then throw "You must not provide an IP family for CT key ${key}."
-        else if ret?family then throw "Look, I know that you might expect that ct expressions have a property \"family\" - I wouldn't blame you, given that the official docs explain what it does... but actually inside the code it has absolutely no effect. Instead, you have to do this - specify \"ip saddr\" or \"ip6 saddr\" instead of \"saddr\", same for \"daddr\"."
+        else if ret?family then debugThrow "Look, I know that you might expect that ct expressions have a property \"family\" - I wouldn't blame you, given that the official docs explain what it does... but actually inside the code it has absolutely no effect. Instead, you have to do this - specify \"ip saddr\" or \"ip6 saddr\" instead of \"saddr\", same for \"daddr\"."
         else ret;
       options.key = lib.mkOption {
         description = "CT key";
@@ -2469,11 +2567,11 @@ let
     };
     ipsecExpression = submodule' {
       finalMerge = { key, ... }@ret: let
-        info = (ctKeys.${key} or {}).__info__ or {};
+        info = ctKeys.${key} or {};
         needsFamily = info.needsFamily or false;
       in
-        if needsFamily && !ret?family then throw "You must provide a family for IPSec key ${key}"
-        else if (ret.spnum or 0) > 255 then throw "Max spnum allowed is 255"
+        if needsFamily && !ret?family then debugThrow "You must provide a family for IPSec key ${key}"
+        else if (ret.spnum or 0) > 255 then debugThrow "Max spnum allowed is 255"
         else ret;
       options.key = lib.mkOption {
         description = "Undocumented upstream";
@@ -2547,9 +2645,9 @@ let
           iif = builtins.elem "iif" flags;
           oif = builtins.elem "oif" flags;
         in
-          if saddr && daddr then throw "Only one flag out of saddr/daddr may be set in fib"
-          else if !saddr && !daddr then throw "One flag out of saddr/daddr must be set in fib"
-          else if iif && oif then throw "At most one one flag out of iif/oif may be set in fib"
+          if saddr && daddr then debugThrow "Only one flag out of saddr/daddr may be set in fib"
+          else if !saddr && !daddr then debugThrow "One flag out of saddr/daddr must be set in fib"
+          else if iif && oif then debugThrow "At most one one flag out of iif/oif may be set in fib"
           else fib;
       skipNulls = false;
       options.result = lib.mkOption {
@@ -2617,7 +2715,7 @@ let
     expression' = attrs: oneOf' ({
       name = "nftablesExpression";
       description = "nftables expression";
-      types = [ lib.types.str lib.types.int lib.types.bool (lib.types.listOf types.expression) types.dslExprHackType ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
+      types = [ lib.types.int lib.types.bool (lib.types.listOf types.expression) stringLike types.dslExprHackType ] ++ (lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
         inherit (v) type;
         description = "${k} expression.\n\n${v.description}";
       })) {
@@ -2786,60 +2884,87 @@ let
     expression = types.expression' {};
   };
   # this is a function that takes a enum name and enum attrs (key = enum element, val = enum element info)
-  # and for each enum element sets __enum__ to enum name, __value__ to element name,
-  # __info__ to info, __toString to a func that returns the element name
-  mkEnum = enum: builtins.mapAttrs (k: v: {
-    __enum__ = enum;
+  # and for each enum element sets __enumName__ to enum name, __enum__ to enum itself, __value__ to element name,
+  # __toString to a func that returns the element name, and takes enum's attrs for the rest
+  mkEnum = name: attrs: let self = builtins.mapAttrs (k: v: (v // {
+    __enumName__ = name;
+    __enum__ = self;
     __value__ = k;
-    __info__ = v;
-    __toString = self: self.__value__;
-  });
+    __toString = self: k;
+  })) attrs; in self;
   nftTypes = mkEnum "nftTypes" {
-    invalid = { };
-    verdict = { };
-    nf_proto = { };
-    bitmask = { };
-    integer = { };
-    string = { };
-    ll_addr = { };
-    ipv4_addr = { };
-    ipv6_addr = { };
-    ether_addr = { };
-    ether_type = { };
-    arp_op = { };
-    inet_proto = { };
-    inet_service = { };
-    icmp_type = { };
-    tcp_flag = { };
-    dccp_pkttype = { };
-    mh_type = { };
-    time = { };
-    mark = { };
-    iface_index = { };
-    iface_type = { };
-    realm = { };
-    classid = { };
-    uid = { };
-    gid = { };
-    ct_state = { };
-    ct_dir = { };
-    ct_status = { };
-    icmpv6_type = { };
-    pkt_type = { };
-    icmp_code = { };
-    icmpv6_code = { };
-    icmpx_code = { };
-    devgroup = { };
-    dscp = { };
-    ecn = { };
-    fib_addtype = { };
-    boolean = { };
-    ifname = { };
-    igmp_type = { };
-    time = { };
-    hour = { };
-    day = { };
-    cgroupsv2 = { };
+    invalid.description = "invalid";
+    verdict.description = "netfilter verdict";
+    nf_proto = { description = "netfilter protocol"; enum = nfProtos; bits = 8; };
+    bitmask = { description = "bitmask"; __functor = self: bits: self // { inherit bits; }; };
+    integer = { description = "integer"; __functor = self: bits: self // { inherit bits; }; };
+    string.description = "string";
+    ll_addr.description = "link layer address";
+    ipv4_addr.bits = 32;
+    ipv4_addr.description = "IPv4 address";
+    ipv4_addr.check = x: builtins.isString x && (let spl = builtins.split "." x; in
+        builtins.length spl == 7
+        && builtins.all lib.id (lib.imap0 (i: x:
+          if i / 2 * 2 == i
+          then builtins.isString x && builtins.match "25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9]" x
+          else x == []) spl));
+    ipv6_addr.bits = 128;
+    ipv6_addr.description = "IPv6 address";
+    ipv6_addr.check = x: let
+      spl = builtins.split "::" x;
+      chk = if !(builtins.isString x) then 999 else let spl = builtins.split ":" x; in
+        if (builtins.length spl) / 2 * 2 != builtins.length spl && builtins.all lib.id (lib.imap0 (i: x:
+          if i / 2 * 2 == i
+          then builtins.isString x && builtins.match "[0-9a-f]?[0-9a-f]?[0-9a-f]?[0-9a-f]" x
+          else x == []) spl)
+        then (builtins.length spl + 1) / 2 else 999;
+    in
+      if builtins.length spl == 1 then chk x == 8
+      else builtins.length spl == 3 && builtins.elemAt spl 1 == [] && (chk (builtins.head spl)) + (chk (lib.last spl)) < 8;
+    ether_addr.bits = 48;
+    ether_addr.description = "Ethernet address";
+    ether_addr.check = x:
+      builtins.isString x && (let spl = builtins.split ":" x; in
+        builtins.length spl == 11
+        && builtins.all lib.id (lib.imap0 (i: x:
+            if i / 2 * 2 == i
+            then builtins.isString x && builtins.match "[0-9a-f][0-9a-f]" x
+            else x == [])
+          spl));
+    ether_type = { bits = 16; description = "Ethernet protocol"; enum = etherTypes; };
+    arp_op = { bits = 16; description = "ARP operation"; enum = arpOps; };
+    inet_proto = { bits = 8; description = "Internet protocol"; enum = inetProtos; };
+    inet_service = { bits = 16; description = "internet network service"; }; # port
+    icmp_type = { bits = 8; description = "ICMP type"; enum = icmpTypes; };
+    tcp_flag = { bits = 8; description = "TCP flag"; enum = tcpFlags; };
+    dccp_pkttype = { bits = 4; description = "DCCP packet type"; enum = dccpPktTypes; };
+    mh_type = { bits = 8; description = "Mobility Header Type"; enum = mhTypes; };
+    mark = { bits = 32; description = "packet mark"; };
+    iface_index = { bits = 32; description = "network interface index"; };
+    iface_type = { bits = 16; description = "network interface type"; enum = ifaceTypes; };
+    realm = { bits = 32; description = "routing realm"; };
+    classid = { bits = 32; description = "TC classid"; };
+    uid = { bits = 32; description = "user ID"; };
+    gid = { bits = 32; description = "group ID"; };
+    ct_state = { bits = 32; description = "conntrack state"; enum = ctStates; };
+    ct_dir = { bits = 8; description = "conntrack direction"; enum = ctDirs; };
+    ct_status = { bits = 32; description = "conntrack status"; enum = ctStatuses; };
+    icmpv6_type = { bits = 8; description = "ICMPv6 type"; enum = icmpv6Types; };
+    pkt_type = { bits = 8; description = "packet type"; enum = pktTypes; };
+    icmp_code = { bits = 8; description = "icmp code"; enum = icmpCodes; };
+    icmpv6_code = { bits = 8; description = "icmpv6 code"; enum = icmpv6Codes; };
+    icmpx_code = { bits = 8; description = "icmpx code"; enum = icmpxCodes; };
+    devgroup = { bits = 32; description = "devgroup name"; };
+    dscp = { bits = 6; description = "Differentiated Services Code Point"; enum = dscpTypes; };
+    ecn.enum = { bits = 2; description = "Explicit Congestion Notification"; enum = ecnTypes; };
+    fib_addrtype = { bits = 32; description = "fib address type"; enum = fibAddrTypes; };
+    boolean = { bits = 1; description = "boolean type"; enum = booleans; };
+    ifname = { bits = 128; description = "network interface name"; }; # string
+    igmp_type = { bits = 8; description = "IGMP type"; enum = igmpTypes; };
+    time = { bits = 64; description = "Relative time of packet reception"; };
+    hour = { bits = 32; description = "Hour of day of packet reception"; };
+    day = { bits = 8; description = "Day of week of packet reception"; enum = days; };
+    cgroupsv2 = { bits = 64; description = "cgroupsv2 path"; };
     # special cases: those types are hardcoded in parser_json.c/string_to_nft_object and can only be set values
     # the reason is they are "objects" rather than "built-in types"
     counter.isKey = false;
@@ -2903,7 +3028,7 @@ let
     skip = {};
   };
   # if type info is needed, it can be parsed from src/meta.c (const struct meta_template meta_templates[])
-  metaKeys = let self = mkEnum "metaKeys" {
+  metaKeys = with nftTypes; let self = mkEnum "metaKeys" {
     # "unqualified" means "don't have to write `meta` before the meta key"
     # but it can mean different things
     # first, the parser is quite lax:
@@ -2916,42 +3041,42 @@ let
     # the keys that MUST be preceded by "meta " in *input* are marked as qualified
     # the keys that MUST NOT be preceded by "meta " in *output* are marked as unqualified
     # the rest dont have anything set, which means they are unqualified in input, but qualified in output
-    length = { qualified = true; };
-    protocol = { qualified = true; };
-    nfproto = {};
-    l4proto = {};
-    priority = { qualified = true; };
-    mark = {};
-    iif = { unqualified = true; };
-    iifname = { unqualified = true; };
-    iiftype = {};
-    oif = { unqualified = true; };
-    oifname = { unqualified = true; };
-    oiftype = {};
-    skuid = {};
-    skgid = {};
-    nftrace = {};
-    rtclassid = {};
-    ibrname = {};
-    obrname = {};
-    pkttype = {};
-    cpu = {};
-    iifgroup = { unqualified = true; };
-    oifgroup = { unqualified = true; };
-    cgroup = {};
-    random = { qualified = true; };
-    ipsec = {};
-    iifkind = {};
-    oifkind = {};
-    ibrpvid = {}; # iifpvid
-    ibrvproto = {}; # iifvproto
-    time = {};
-    day = {};
-    hour = {};
-    secmark = { qualified = true; };
-    sdif = {};
-    sdifname = {};
-    broute = {};
+    length = { qualified = true; type = integer 32; };
+    protocol = { qualified = true; type = ether_type; };
+    nfproto.type = nf_proto;
+    l4proto.type = inet_proto;
+    priority = { qualified = true; type = classid; };
+    mark.type = mark;
+    iif = { unqualified = true; type = iface_index; };
+    iifname = { unqualified = true; type = ifname; };
+    iiftype.type = iface_type;
+    oif = { unqualified = true; type = iface_index; };
+    oifname = { unqualified = true; type = ifname; };
+    oiftype.type = iface_type;
+    skuid.type = uid;
+    skgid.type = gid;
+    nftrace.type = integer 1;
+    rtclassid.type = realm;
+    ibrname.type = ifname;
+    obrname.type = ifname;
+    pkttype.type = pkt_type;
+    cpu.type = integer 32;
+    iifgroup = { unqualified = true; type = devgroup; };
+    oifgroup = { unqualified = true; type = devgroup; };
+    cgroup.type = integer 32;
+    random = { qualified = true; type = integer 32; };
+    ipsec.type = boolean;
+    iifkind.type = ifname;
+    oifkind.type = ifname;
+    ibrpvid.type = integer 16; # iifpvid
+    ibrvproto.type = ether_type; # iifvproto
+    time.type = time;
+    day.type = day;
+    hour.type = hour;
+    secmark = { qualified = true; type = integer 32; };
+    sdif.type = iface_index;
+    sdifname.type = ifname;
+    broute.type = integer 1;
   }; in self // {
     # technically those aliases are supported by nftables code, but if they are aliases anyway
     # i might as well make them proper aliases in nix code as well
@@ -2962,7 +3087,10 @@ let
     ibridgename = self.ibrname;
     obridgename = self.obrname;
   };
-  # static int parse_family(const char *name, uint32_t *family)
+  nfProtos = mkEnum "nf_proto" {
+    ipv4.value = 2;
+    ipv6.value = 10;
+  };
   families = mkEnum "families" {
     ip = {
       hooks = [ "prerouting" "input" "forward" "output" "postrouting" ];
@@ -3111,26 +3239,139 @@ let
     timestamp = { };
     sack-perm = { };
   };
-  payloadProtocols = mkEnum "payloadProtocols" {
-    ether.fields = [ "daddr" "saddr" "type" ];
-    vlan.fields = [ "id" "dei" "pcp" "type" ];
-    arp.fields = [ "htype" "ptype" "hlen" "plen" "operation" "saddr ip" "saddr ether" "daddr ip" "daddr ether" ];
-    ip.fields = [ "version" "hdrlength" "dscp" "ecn" "length" "id" "frag-off" "ttl" "protocol" "checksum" "saddr" "daddr" ];
-    icmp.fields = [ "type" "code" "checksum" "id" "sequence" "gateway" "mtu" ];
-    igmp.fields = [ "type" "mrt" "checksum" "group" ];
-    ip6.fields = [ "version" "dscp" "ecn" "flowlabel" "length" "nexthdr" "hoplimit" "saddr" "daddr" ];
+  payloadProtocols = with nftTypes; mkEnum "payloadProtocols" {
+    ether.fields = {
+      daddr = ether_addr;
+      saddr = ether_addr;
+      type = ether_type;
+    };
+    vlan.fields = {
+      pcp = integer 3;
+      # dei is the same as cfi
+      dei = integer 1;
+      cfi = integer 1;
+      id = integer 12;
+      type = ether_type;
+    };
+    arp.fields = {
+      htype = integer 16;
+      ptype = ether_type;
+      hlen = integer 8;
+      plen = integer 8;
+      operation = arp_op;
+      "saddr ip" = ipv4_addr;
+      "saddr ether" = ether_addr;
+      "daddr ip" = ipv4_addr;
+      "daddr ether" = ether_addr;
+    };
+    ip.fields = {
+      l4proto = inet_proto; # not sure if this is valid?
+      version = integer 4;
+      hdrlength = integer 4;
+      inherit dscp ecn;
+      length = integer 16;
+      id = integer 16;
+      frag-off = integer 16;
+      ttl = integer 8;
+      protocol = inet_proto;
+      checksum = integer 16;
+      saddr = ipv4_addr;
+      daddr = ipv4_addr;
+    };
+    icmp.fields = {
+      type = icmp_type;
+      code = icmp_code;
+      checksum = integer 16;
+      id = integer 16;
+      sequence = integer 16;
+      gateway = integer 32;
+      mtu = integer 16;
+    };
+    igmp.fields = {
+      type = igmp_type;
+      mrt = integer 8;
+      checksum = integer 16;
+      group = integer 32;
+    };
+    ip6.fields = {
+      l4proto = inet_proto; # not sure if this is valid?
+      version = integer 4;
+      dscp = integer 6;
+      ecn = integer 2;
+      flowlabel = integer 20;
+      length = integer 16;
+      nexthdr = inet_proto;
+      hoplimit = integer 8;
+      saddr = ipv6_addr;
+      daddr = ipv6_addr;
+    };
     # documentation shows packet-too-big instead of mtu... but in the code and in the internal tests it's clearly mtu...
-    icmpv6.fields = [ "type" "code" "checksum" "parameter-problem" "mtu" "id" "sequence" "max-delay" ];
-    tcp.fields = [ "sport" "dport" "sequence" "ackseq" "doff" "reserved" "flags" "window" "checksum" "urgptr" ];
-    udp.fields = [ "sport" "dport" "length" "checksum" ];
-    udplite.fields = [ "sport" "dport" "csumcov" "checksum" ];
-    sctp.fields = [ "sport" "dport" "vtag" "checksum" ];
-    dccp.fields = [ "sport" "dport" "type" ];
-    ah.fields = [ "nexthdr" "hdrlength" "reserved" "spi" "sequence" ];
-    esp.fields = [ "spi" "sequence" ];
-    comp.fields = [ "nexthdr" "flags" "cpi" ];
+    icmpv6.fields = {
+      type = icmpv6_type;
+      code = icmpv6_code;
+      checksum = integer 16;
+      parameter-problem = integer 32;
+      mtu = integer 32;
+      id = integer 16;
+      sequence = integer 16;
+      max-delay = integer 16;
+    };
+    tcp.fields = {
+      sport = inet_service;
+      dport = inet_service;
+      sequence = integer 32;
+      ackseq = integer 32;
+      doff = integer 4;
+      reserved = integer 4;
+      flags = integer 8;
+      window = integer 16;
+      checksum = integer 16;
+      urgptr = integer 16;
+    };
+    udp.fields = {
+      sport = inet_service;
+      dport = inet_service;
+      length = integer 16;
+      checksum = integer 16;
+    };
+    udplite.fields = {
+      sport = inet_service;
+      dport = inet_service;
+      csumcov = integer 16;
+      checksum = integer 16;
+    };
+    sctp.fields = {
+      sport = inet_service;
+      dport = inet_service;
+      vtag = integer 32;
+      checksum = integer 32;
+    };
+    dccp.fields = {
+      sport = inet_service;
+      dport = inet_service;
+      type = dccp_pkttype;
+    };
+    ah.fields = {
+      nexthdr = inet_proto;
+      hdrlength = integer 8;
+      reserved = integer 16;
+      spi = integer 32;
+      sequence = integer 32;
+    };
+    esp.fields = {
+      spi = integer 32;
+      sequence = integer 32;
+    };
+    comp.fields = {
+      nexthdr = inet_proto;
+      flags = integer 8;
+      cpi = integer 16;
+    };
     # this isn't documented anywhere, but yes it works
-    th.fields = [ "sport" "dport" ];
+    th.fields = {
+      sport = inet_service;
+      dport = inet_service;
+    };
     # the following protocols encapsulate other protocols
     # getting encapsulated protos' fields isn't supported in the json syntax, and as such the protocols aren't supported altogether
     # to add insult to the injury, the docs specify wrong fields... well, it's fine, because the protocols aren't supported anyway
@@ -3147,93 +3388,162 @@ let
     {}
     (builtins.concatLists
       (map
-        (x: x.__info__.fields)
+        (x: builtins.attrNames x.fields)
         (builtins.attrValues payloadProtocols))));
-  exthdrs = mkEnum "exthdrs" {
-    hbh.fields = [ "nexthdr" "hdrlength" ];
-    rt2.fields = [];
-    rt0.fields = [ "reserved" "addr[1]" "addr[2]" ];
+  exthdrs = with nftTypes; mkEnum "exthdrs" {
+    hbh.fields = {
+      nexthdr = integer 8;
+      hdrlength = integer 8;
+    };
+    rt2.fields = { };
+    rt0.fields = { 
+      reserved = integer 32;
+      "addr[1]" = ipv6_addr;
+      "addr[2]" = ipv6_addr;
+    };
     # i'm beginning to think I shouldn't trust these docs...
-    srh.fields = [ "last-entry" "flags" "tag" "sid[1]" "sid[2]" ];
+    srh.fields = {
+      last-entry = integer 8;
+      flags = integer 8;
+      tag = integer 16;
+      "sid[1]" = ipv6_addr;
+      "sid[2]" = ipv6_addr;
+    };
     # srh.fields = [ "last-entry" "flags" "tag" "sid" "seg-left" ];
-    rt.fields = [ "nexthdr" "hdrlength" "type" "seg-left" ];
-    frag.fields = [ "nexthdr" "reserved" "frag-off" "reserved2" "more-fragments" "id" ];
-    dst.fields = [ "nexthdr" "hdrlength" ];
-    mh.fields = [ "nexthdr" "hdrlength" "type" "reserved" "checksum" ];
+    rt.fields = {
+      nexthdr = inet_proto;
+      hdrlength = integer 8;
+      type = integer 8;
+      seg-left = integer 8;
+    };
+    frag.fields = {
+      nexthdr = inet_proto;
+      reserved = integer 8;
+      frag-off = integer 13;
+      reserved2 = integer 2;
+      # more-fragments = integer 1;
+      more-fragments = boolean;
+      id = integer 16;
+    };
+    dst.fields = {
+      nexthdr = inet_proto;
+      hdrlength = integer 8;
+    };
+    mh.fields = {
+      nexthdr = inet_proto;
+      hdrlength = integer 8;
+      type = mh_type;
+      reserved = integer 8;
+      checksum = integer 16;
+    };
   };
   exthdrFields = mkEnum "exthdrFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
-        (x: x.__info__.fields)
+        (x: builtins.attrNames x.fields)
         (builtins.attrValues exthdrs))));
   # src/tcpopt.c, special case in parser for sack0-sack3
-  tcpOptions = mkEnum "tcpOptions" {
+  tcpOptions = with nftTypes; let
+    length = integer 8;
+    size = integer 16;
+    count = integer 8;
+    left = integer 32;
+    right = integer 32;
+    tsval = integer 32;
+    tsecr = integer 32;
+    subtype = integer 4;
+  in mkEnum "tcpOptions" {
     # additionally, "kind" is listed everywhere in the code... just in case, don't support it here
-    eol.fields = [ ];
-    nop.fields = [ ];
-    maxseg.fields = [ "length" "size" ];
-    window.fields = [ "length" "count" ];
-    sack-perm.fields = [ "length" ];
-    sack.fields = [ "length" "left" "right" ];
-    sack0.fields = [ "length" "left" "right" ];
-    sack1.fields = [ "length" "left" "right" ];
-    sack2.fields = [ "length" "left" "right" ];
-    sack3.fields = [ "length" "left" "right" ];
-    timestamp.fields = [ "length" "tsval" "tsecr" ];
+    eol.fields = { };
+    nop.fields = { };
+    maxseg.fields = { inherit length size; };
+    window.fields = { inherit length count; };
+    sack-perm.fields = { inherit length; };
+    sack.fields = { inherit length left right; };
+    sack0.fields = { inherit length left right; };
+    sack1.fields = { inherit length left right; };
+    sack2.fields = { inherit length left right; };
+    sack3.fields = { inherit length left right; };
+    timestamp.fields = { inherit length tsval tsecr; };
     # undocumented
-    fastopen.fields = [ "length" ];
-    md5sig.fields = [ "length" ];
-    mptcp.fields = [ "length" "subtype" ];
+    fastopen.fields = { inherit length; };
+    md5sig.fields = { inherit length; };
+    mptcp.fields = { inherit length subtype; };
   };
   tcpOptionFields = mkEnum "tcpOptionFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
-        (x: x.__info__.fields)
+        (x: builtins.attrNames x.fields)
         (builtins.attrValues tcpOptions))));
-  ipOptions = mkEnum "ipOptions" {
-    lsrr.fields = [ "type" "length" "ptr" "addr" ];
-    rr.fields = [ "type" "length" "ptr" "addr" ];
-    ssrr.fields = [ "type" "length" "ptr" "addr" ];
-    ra.fields = [ "type" "length" "value" ];
+  ipOptions = with nftTypes; let
+    type = integer 8;
+    length = integer 8;
+    ptr = integer 8;
+    addr = integer 32;
+    value = integer 16;
+  in mkEnum "ipOptions" {
+    lsrr.fields = { inherit type length ptr addr; };
+    rr.fields = { inherit type length ptr addr; };
+    ssrr.fields = { inherit type length ptr addr; };
+    ra.fields = { inherit type length value; };
   };
   ipOptionFields = mkEnum "ipOptionFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
-        (x: x.__info__.fields)
+        (x: builtins.attrNames x.fields)
         (builtins.attrValues ipOptions))));
   # src/sctp_chunk.c
-  sctpChunks = mkEnum "sctpChunks" {
-    data.fields = [ "type" "flags" "length" "tsn" "stream" "ssn" "ppid" ];
-    init.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
-    init-ack.fields = [ "type" "flags" "length" "init-tag" "a-rwnd" "num-outbound-streams" "num-inbound-streams" "initial-tsn" ];
-    sack.fields = [ "type" "flags" "length" "a-rwnd" "cum-tsn-ack" "num-gap-ack-blocks" "num-dup-tsns" ];
-    heartbeat.fields = [ "type" "flags" "length" ];
-    heartbeat-ack.fields = [ "type" "flags" "length" ];
-    abort.fields = [ "type" "flags" "length" ];
-    shutdown.fields = [ "type" "flags" "length" "cum-tsn-ack" ];
-    shutdown-ack.fields = [ "type" "flags" "length" ];
-    error.fields = [ "type" "flags" "length" ];
-    cookie-echo.fields = [ "type" "flags" "length" ];
-    cookie-ack.fields = [ "type" "flags" "length" ];
-    ecne.fields = [ "type" "flags" "length" "lowest-tsn" ];
-    cwr.fields = [ "type" "flags" "length" "lowest-tsn" ];
-    shutdown-complete.fields = [ "type" "flags" "length" ];
-    asconf-ack.fields = [ "type" "flags" "length" "seqno" ];
-    forward-tsn.fields = [ "type" "flags" "length" "new-cum-tsn" ];
-    asconf.fields = [ "type" "flags" "length" "seqno" ];
+  sctpChunks = with nftTypes; let
+    type = integer 8;
+    flags = integer 8;
+    length = integer 16;
+    tsn = integer 32;
+    stream = integer 16;
+    ssn = integer 16;
+    ppid = integer 32;
+    init-tag = integer 32;
+    a-rwnd = integer 32;
+    num-outbound-streams = integer 16;
+    num-inbound-streams = integer 16;
+    cum-tsn-ack = integer 32;
+    num-gap-ack-blocks = integer 16;
+    num-dup-tsns = integer 16;
+    initial-tsn = integer 32;
+    lowest-tsn = integer 32;
+    seqno = integer 32;
+    new-cum-tsn = integer 32;
+  in mkEnum "sctpChunks" {
+    data.fields = { inherit type flags length tsn stream ssn ppid; };
+    init.fields = { inherit type flags length init-tag a-rwnd num-outbound-streams num-inbound-streams initial-tsn; };
+    init-ack.fields = { inherit type flags length init-tag a-rwnd num-outbound-streams num-inbound-streams initial-tsn; };
+    sack.fields = { inherit type flags length a-rwnd cum-tsn-ack num-gap-ack-blocks num-dup-tsns; };
+    heartbeat.fields = { inherit type flags length; };
+    heartbeat-ack.fields = { inherit type flags length; };
+    abort.fields = { inherit type flags length; };
+    shutdown.fields = { inherit type flags length cum-tsn-ack; };
+    shutdown-ack.fields = { inherit type flags length; };
+    error.fields = { inherit type flags length; };
+    cookie-echo.fields = { inherit type flags length; };
+    cookie-ack.fields = { inherit type flags length; };
+    ecne.fields = { inherit type flags length lowest-tsn; };
+    cwr.fields = { inherit type flags length lowest-tsn; };
+    shutdown-complete.fields = { inherit type flags length; };
+    asconf-ack.fields = { inherit type flags length seqno; };
+    forward-tsn.fields = { inherit type flags length new-cum-tsn; };
+    asconf.fields = { inherit type flags length seqno; };
   };
   sctpChunkFields = mkEnum "sctpChunkFields" (builtins.foldl'
     (res: field: res // { ${field} = {}; })
     {}
     (builtins.concatLists
       (map
-        (x: x.__info__.fields)
+        (x: builtins.attrNames x.fields)
         (builtins.attrValues sctpChunks))));
   ctKeys = let
     ff = { dir = false; family = false; }; # false/false
@@ -3347,369 +3657,365 @@ let
     };
   };
   # tcp_flag
-  tcpFlags = builtins.mapAttrs (k: v: k) {
-    fin = 1;
-    syn = 2;
-    rst = 4;
-    psh = 8;
-    ack = 16;
-    urg = 32;
-    ecn = 64;
-    cwr = 128;
+  tcpFlags = mkEnum "tcp_flag" {
+    fin.value = 1;
+    syn.value = 2;
+    rst.value = 4;
+    psh.value = 8;
+    ack.value = 16;
+    urg.value = 32;
+    ecn.value = 64;
+    cwr.value = 128;
   };
   # fib_addrtype
-  fibAddrTypes = builtins.mapAttrs (k: v: k) {
-    unspec = 0;
-    unicast = 1;
-    local = 2;
-    broadcast = 3;
-    anycast = 4;
-    multicast = 5;
-    blackhole = 6;
-    unreachable = 7;
-    prohibit = 8;
+  fibAddrTypes = mkEnum "fib_addrtype" {
+    unspec.value = 0;
+    unicast.value = 1;
+    local.value = 2;
+    broadcast.value = 3;
+    anycast.value = 4;
+    multicast.value = 5;
+    blackhole.value = 6;
+    unreachable.value = 7;
+    prohibit.value = 8;
   };
   # icmp_type; for payload
-  icmpTypes = builtins.mapAttrs (k: v: k) {
-    echo-reply = 0;
-    destination-unreachable = 3;
-    source-quench = 4;
-    redirect = 5;
-    echo-request = 8;
-    router-advertisement = 9;
-    router-solicitation = 10;
-    time-exceeded = 11;
-    parameter-problem = 12;
-    timestamp-request = 13;
-    timestamp-reply = 14;
-    info-request = 15;
-    info-reply = 16;
-    address-mask-request = 17;
-    address-mask-reply = 18;
+  icmpTypes = mkEnum "icmp_type" {
+    echo-reply.value = 0;
+    destination-unreachable.value = 3;
+    source-quench.value = 4;
+    redirect.value = 5;
+    echo-request.value = 8;
+    router-advertisement.value = 9;
+    router-solicitation.value = 10;
+    time-exceeded.value = 11;
+    parameter-problem.value = 12;
+    timestamp-request.value = 13;
+    timestamp-reply.value = 14;
+    info-request.value = 15;
+    info-reply.value = 16;
+    address-mask-request.value = 17;
+    address-mask-reply.value = 18;
   };
   # for payload
-  icmpv6Types = builtins.mapAttrs (k: v: k) {
-    destination-unreachable = 1;
-    packet-too-big = 2;
-    time-exceeded = 3;
-    parameter-problem = 4;
-    echo-request = 128;
-    echo-reply = 129;
-    mld-listener-query = 130;
-    mld-listener-report = 131;
-    mld-listener-done = 132;
-    mld-listener-reduction = 132;
-    nd-router-solicit = 133;
-    nd-router-advert = 134;
-    nd-neighbor-solicit = 135;
-    nd-neighbor-advert = 136;
-    nd-redirect = 137;
-    router-renumbering = 138;
-    ind-neighbor-solicit = 141;
-    ind-neighbor-advert = 142;
-    mld2-listener-report = 143;
+  icmpv6Types = mkEnum "icmpv6_type" {
+    destination-unreachable.value = 1;
+    packet-too-big.value = 2;
+    time-exceeded.value = 3;
+    parameter-problem.value = 4;
+    echo-request.value = 128;
+    echo-reply.value = 129;
+    mld-listener-query.value = 130;
+    mld-listener-report.value = 131;
+    mld-listener-done.value = 132;
+    mld-listener-reduction.value = 132;
+    nd-router-solicit.value = 133;
+    nd-router-advert.value = 134;
+    nd-neighbor-solicit.value = 135;
+    nd-neighbor-advert.value = 136;
+    nd-redirect.value = 137;
+    router-renumbering.value = 138;
+    ind-neighbor-solicit.value = 141;
+    ind-neighbor-advert.value = 142;
+    mld2-listener-report.value = 143;
   };
   # for payload
-  igmpTypes = builtins.mapAttrs (k: v: k) {
-    membership-query = 17;
-    membership-report-v1 = 18;
-    membership-report-v2 = 22;
-    membership-report-v3 = 34;
-    leave-group = 23;
+  igmpTypes = mkEnum "igmp_type" {
+    membership-query.value = 17;
+    membership-report-v1.value = 18;
+    membership-report-v2.value = 22;
+    membership-report-v3.value = 34;
+    leave-group.value = 23;
   };
   # for dccp payload
-  dccpPktTypes = builtins.mapAttrs (k: v: k) {
-    request = 0;
-    response = 1;
-    data = 2;
-    ack = 3;
-    dataack = 4;
-    closereq = 5;
-    close = 6;
-    reset = 7;
-    sync = 8;
-    syncack = 9;
+  dccpPktTypes = mkEnum "dccp_pkttype" {
+    request.value = 0;
+    response.value = 1;
+    data.value = 2;
+    ack.value = 3;
+    dataack.value = 4;
+    closereq.value = 5;
+    close.value = 6;
+    reset.value = 7;
+    sync.value = 8;
+    syncack.value = 9;
   };
   # for ip payload. The nftables type is just called "dscp"
-  dscpTypes = builtins.mapAttrs (k: v: k) {
-    cs0 = 0;
-    cs1 = 8;
-    cs2 = 16;
-    cs3 = 24;
-    cs4 = 32;
-    cs5 = 40;
-    cs6 = 48;
-    cs7 = 56;
-    df = 0;
-    be = 0;
-    lephb = 1;
-    af11 = 10;
-    af12 = 12;
-    af13 = 14;
-    af21 = 18;
-    af22 = 20;
-    af23 = 22;
-    af31 = 26;
-    af32 = 28;
-    af33 = 30;
-    af41 = 34;
-    af42 = 36;
-    af43 = 38;
-    va = 44;
-    ef = 46;
+  dscpTypes = mkEnum "dscp" {
+    cs0.value = 0;
+    cs1.value = 8;
+    cs2.value = 16;
+    cs3.value = 24;
+    cs4.value = 32;
+    cs5.value = 40;
+    cs6.value = 48;
+    cs7.value = 56;
+    df.value = 0;
+    be.value = 0;
+    lephb.value = 1;
+    af11.value = 10;
+    af12.value = 12;
+    af13.value = 14;
+    af21.value = 18;
+    af22.value = 20;
+    af23.value = 22;
+    af31.value = 26;
+    af32.value = 28;
+    af33.value = 30;
+    af41.value = 34;
+    af42.value = 36;
+    af43.value = 38;
+    va.value = 44;
+    ef.value = 46;
   };
   # for ip payload. The nftables type is just called "ecn"
-  ecnTypes = builtins.mapAttrs (k: v: k) {
-    not-ect = 0;
-    ect1 = 1;
-    ect0 = 2;
-    ce = 3;
+  ecnTypes = mkEnum "ecn" {
+    not-ect.value = 0;
+    ect1.value = 1;
+    ect0.value = 2;
+    ce.value = 3;
   };
-  ctStates = builtins.mapAttrs (k: v: k) {
-    invalid = 1;
-    established = 2;
-    related = 4;
-    new = 8;
-    untracked = 64;
+  ctStates = mkEnum "ct_state" {
+    invalid.value = 1;
+    established.value = 2;
+    related.value = 4;
+    new.value = 8;
+    untracked.value = 64;
   };
   # mobility header exthdr
-  mhTypes = builtins.mapAttrs (k: v: k) {
-    binding-refresh-request = 0;
-    home-test-init = 1;
-    careof-test-init = 2;
-    home-test = 3;
-    careof-test = 4;
-    binding-update = 5;
-    binding-acknowledgement = 6;
-    binding-error = 7;
-    fast-binding-update = 8;
-    fast-binding-acknowledgement = 9;
-    fast-binding-advertisement = 10;
-    experimental-mobility-header = 11;
-    home-agent-switch-message = 12;
-  };
-  # also known as l3proto
-  nfprotoTypes = builtins.mapAttrs (k: v: k) {
-    ipv4 = 2;
-    ipv6 = 10;
+  mhTypes = mkEnum "mh_type" {
+    binding-refresh-request.value = 0;
+    home-test-init.value = 1;
+    careof-test-init.value = 2;
+    home-test.value = 3;
+    careof-test.value = 4;
+    binding-update.value = 5;
+    binding-acknowledgement.value = 6;
+    binding-error.value = 7;
+    fast-binding-update.value = 8;
+    fast-binding-acknowledgement.value = 9;
+    fast-binding-advertisement.value = 10;
+    experimental-mobility-header.value = 11;
+    home-agent-switch-message.value = 12;
   };
   # inet_proto, the type of meta ip protocol/meta ip6 nexthdr/etc
-  inetProtos = builtins.mapAttrs (k: v: k) {
-    hopopt = 0;
-    icmp = 1;
-    igmp = 2;
-    ggp = 3;
-    ipv4 = 4;
-    st = 5;
-    tcp = 6;
-    cbt = 7;
-    egp = 8;
-    igp = 9;
-    bbn-rcc-mon = 10;
-    nvp-ii = 11;
-    pup = 12;
-    emcon = 14;
-    xnet = 15;
-    chaos = 16;
-    udp = 17;
-    mux = 18;
-    dcn-meas = 19;
-    hmp = 20;
-    prm = 21;
-    xns-idp = 22;
-    trunk-1 = 23;
-    trunk-2 = 24;
-    leaf-1 = 25;
-    leaf-2 = 26;
-    rdp = 27;
-    irtp = 28;
-    iso-tp4 = 29;
-    netblt = 30;
-    mfe-nsp = 31;
-    merit-inp = 32;
-    dccp = 33;
-    "3pc" = 34;
-    idpr = 35;
-    xtp = 36;
-    ddp = 37;
-    idpr-cmtp = 38;
-    "tp++" = 39;
-    il = 40;
-    ipv6 = 41;
-    sdrp = 42;
-    ipv6-route = 43;
-    ipv6-frag = 44;
-    idrp = 45;
-    rsvp = 46;
-    gre = 47;
-    dsr = 48;
-    bna = 49;
-    esp = 50;
-    ah = 51;
-    i-nlsp = 52;
-    narp = 54;
-    mobile = 55;
-    tlsp = 56;
-    skip = 57;
-    ipv6-icmp = 58;
-    ipv6-nonxt = 59;
-    ipv6-opts = 60;
-    cftp = 62;
-    sat-expak = 64;
-    kryptolan = 65;
-    rvd = 66;
-    ippc = 67;
-    sat-mon = 69;
-    visa = 70;
-    ipcv = 71;
-    cpnx = 72;
-    cphb = 73;
-    wsn = 74;
-    pvp = 75;
-    br-sat-mon = 76;
-    sun-nd = 77;
-    wb-mon = 78;
-    wb-expak = 79;
-    iso-ip = 80;
-    vmtp = 81;
-    secure-vmtp = 82;
-    vines = 83;
-    iptm = 84;
-    nsfnet-igp = 85;
-    dgp = 86;
-    tcf = 87;
-    eigrp = 88;
-    ospfigp = 89;
-    sprite-rpc = 90;
-    larp = 91;
-    mtp = 92;
-    "ax.25" = 93;
-    ipip = 94;
-    scc-sp = 96;
-    etherip = 97;
-    encap = 98;
-    gmtp = 100;
-    ifmp = 101;
-    pnni = 102;
-    pim = 103;
-    aris = 104;
-    scps = 105;
-    qnx = 106;
-    "a/n" = 107;
-    ipcomp = 108;
-    snp = 109;
-    compaq-peer = 110;
-    ipx-in-ip = 111;
-    vrrp = 112;
-    pgm = 113;
-    l2tp = 115;
-    ddx = 116;
-    iatp = 117;
-    stp = 118;
-    srp = 119;
-    uti = 120;
-    smp = 121;
-    ptp = 123;
-    fire = 125;
-    crtp = 126;
-    crudp = 127;
-    sscopmce = 128;
-    iplt = 129;
-    sps = 130;
-    pipe = 131;
-    sctp = 132;
-    fc = 133;
-    rsvp-e2e-ignore = 134;
-    udplite = 136;
-    mpls-in-ip = 137;
-    manet = 138;
-    hip = 139;
-    shim6 = 140;
-    wesp = 141;
-    rohc = 142;
-    ethernet = 143;
-    aggfrag = 144;
+  inetProtos = mkEnum "inet_proto" {
+    hopopt.value = 0;
+    icmp.value = 1;
+    igmp.value = 2;
+    ggp.value = 3;
+    ipv4.value = 4;
+    st.value = 5;
+    tcp.value = 6;
+    cbt.value = 7;
+    egp.value = 8;
+    igp.value = 9;
+    bbn-rcc-mon.value = 10;
+    nvp-ii.value = 11;
+    pup.value = 12;
+    emcon.value = 14;
+    xnet.value = 15;
+    chaos.value = 16;
+    udp.value = 17;
+    mux.value = 18;
+    dcn-meas.value = 19;
+    hmp.value = 20;
+    prm.value = 21;
+    xns-idp.value = 22;
+    trunk-1.value = 23;
+    trunk-2.value = 24;
+    leaf-1.value = 25;
+    leaf-2.value = 26;
+    rdp.value = 27;
+    irtp.value = 28;
+    iso-tp4.value = 29;
+    netblt.value = 30;
+    mfe-nsp.value = 31;
+    merit-inp.value = 32;
+    dccp.value = 33;
+    "3pc".value = 34;
+    idpr.value = 35;
+    xtp.value = 36;
+    ddp.value = 37;
+    idpr-cmtp.value = 38;
+    "tp++".value = 39;
+    il.value = 40;
+    ipv6.value = 41;
+    sdrp.value = 42;
+    ipv6-route.value = 43;
+    ipv6-frag.value = 44;
+    idrp.value = 45;
+    rsvp.value = 46;
+    gre.value = 47;
+    dsr.value = 48;
+    bna.value = 49;
+    esp.value = 50;
+    ah.value = 51;
+    i-nlsp.value = 52;
+    narp.value = 54;
+    mobile.value = 55;
+    tlsp.value = 56;
+    skip.value = 57;
+    ipv6-icmp.value = 58;
+    ipv6-nonxt.value = 59;
+    ipv6-opts.value = 60;
+    cftp.value = 62;
+    sat-expak.value = 64;
+    kryptolan.value = 65;
+    rvd.value = 66;
+    ippc.value = 67;
+    sat-mon.value = 69;
+    visa.value = 70;
+    ipcv.value = 71;
+    cpnx.value = 72;
+    cphb.value = 73;
+    wsn.value = 74;
+    pvp.value = 75;
+    br-sat-mon.value = 76;
+    sun-nd.value = 77;
+    wb-mon.value = 78;
+    wb-expak.value = 79;
+    iso-ip.value = 80;
+    vmtp.value = 81;
+    secure-vmtp.value = 82;
+    vines.value = 83;
+    iptm.value = 84;
+    nsfnet-igp.value = 85;
+    dgp.value = 86;
+    tcf.value = 87;
+    eigrp.value = 88;
+    ospfigp.value = 89;
+    sprite-rpc.value = 90;
+    larp.value = 91;
+    mtp.value = 92;
+    "ax.25".value = 93;
+    ipip.value = 94;
+    scc-sp.value = 96;
+    etherip.value = 97;
+    encap.value = 98;
+    gmtp.value = 100;
+    ifmp.value = 101;
+    pnni.value = 102;
+    pim.value = 103;
+    aris.value = 104;
+    scps.value = 105;
+    qnx.value = 106;
+    "a/n".value = 107;
+    ipcomp.value = 108;
+    snp.value = 109;
+    compaq-peer.value = 110;
+    ipx-in-ip.value = 111;
+    vrrp.value = 112;
+    pgm.value = 113;
+    l2tp.value = 115;
+    ddx.value = 116;
+    iatp.value = 117;
+    stp.value = 118;
+    srp.value = 119;
+    uti.value = 120;
+    smp.value = 121;
+    ptp.value = 123;
+    fire.value = 125;
+    crtp.value = 126;
+    crudp.value = 127;
+    sscopmce.value = 128;
+    iplt.value = 129;
+    sps.value = 130;
+    pipe.value = 131;
+    sctp.value = 132;
+    fc.value = 133;
+    rsvp-e2e-ignore.value = 134;
+    udplite.value = 136;
+    mpls-in-ip.value = 137;
+    manet.value = 138;
+    hip.value = 139;
+    shim6.value = 140;
+    wesp.value = 141;
+    rohc.value = 142;
+    ethernet.value = 143;
+    aggfrag.value = 144;
   };
-  icmpCodes = builtins.mapAttrs (k: v: k) {
-    net-unreachable = 0;
-    host-unreachable = 1;
-    prot-unreachable = 2;
-    port-unreachable = 3;
-    net-prohibited = 9;
-    host-prohibited = 10;
-    admin-prohibited = 13;
-    frag-needed = 4;
+  icmpCodes = mkEnum "icmp_code" {
+    net-unreachable.value = 0;
+    host-unreachable.value = 1;
+    prot-unreachable.value = 2;
+    port-unreachable.value = 3;
+    net-prohibited.value = 9;
+    host-prohibited.value = 10;
+    admin-prohibited.value = 13;
+    frag-needed.value = 4;
   };
-  icmpv6Codes = builtins.mapAttrs (k: v: k) {
-    no-route = 0;
-    admin-prohibited = 1;
-    addr-unreachable = 3;
-    port-unreachable = 4;
-    policy-fail = 5;
-    reject-route = 6;
+  icmpv6Codes = mkEnum "icmpv6_code" {
+    no-route.value = 0;
+    admin-prohibited.value = 1;
+    addr-unreachable.value = 3;
+    port-unreachable.value = 4;
+    policy-fail.value = 5;
+    reject-route.value = 6;
   };
-  icmpxCodes = builtins.mapAttrs (k: v: k) {
-    port-unreachable = 1;
-    admin-prohibited = 3;
-    no-route = 0;
-    host-unreachable = 2;
+  icmpxCodes = mkEnum "icmpx_code" {
+    port-unreachable.value = 1;
+    admin-prohibited.value = 3;
+    no-route.value = 0;
+    host-unreachable.value = 2;
   };
+  # special case: don't make this an actual enum
   booleans = {
-    exists = true;
-    missing = false;
+    exists.value = true;
+    missing.value = false;
   };
-  exists = booleans.exists;
-  missing = booleans.missing;
-  etherTypes = builtins.mapAttrs (k: v: k) {
-    ip = 8;
-    arp = 1544;
-    ip6 = 56710;
-    "8021q" = 129;
-    "8021ad" = 43144;
-    vlan = 129;
+  exists = true;
+  missing = false;
+  etherTypes = mkEnum "ether_type" {
+    ip.value = 8;
+    arp.value = 1544;
+    ip6.value = 56710;
+    "8021q".value = 129;
+    "8021ad".value = 43144;
+    vlan.value = 129;
   };
-  arpOps = builtins.mapAttrs (k: v: k) {
-    request = 256;
-    reply = 512;
-    rrequest = 768;
-    rreply = 1024;
-    inrequest = 2048;
-    inreply = 2304;
-    nak = 2560;
+  arpOps = mkEnum "arp_op" {
+    request.value = 256;
+    reply.value = 512;
+    rrequest.value = 768;
+    rreply.value = 1024;
+    inrequest.value = 2048;
+    inreply.value = 2304;
+    nak.value = 2560;
   };
-  ifaceTypes = builtins.mapAttrs (k: v: k) {
-    ether = 1;
-    ppp = 512;
-    ipip = 768;
-    ipip6 = 769;
-    loopback = 772;
-    sit = 776;
-    ipgre = 778;
+  ifaceTypes = mkEnum {
+    ether.value = 1;
+    ppp.value = 512;
+    ipip.value = 768;
+    ipip6.value = 769;
+    loopback.value = 772;
+    sit.value = 776;
+    ipgre.value = 778;
   };
-  ctStatuses = builtins.mapAttrs (k: v: k) {
-    expected = 1;
-    seen-reply = 2;
-    assured = 4;
-    confirmed = 8;
-    snat = 16;
-    dnat = 32;
-    dying = 512;
+  ctStatuses = mkEnum "ct_status" {
+    expected.value = 1;
+    seen-reply.value = 2;
+    assured.value = 4;
+    confirmed.value = 8;
+    snat.value = 16;
+    dnat.value = 32;
+    dying.value = 512;
   };
-  pktTypes = builtins.mapAttrs (k: v: k) {
-    host = 0;
-    unicast = 0;
-    broadcast = 1;
-    multicast = 2;
-    other = 3;
+  pktTypes = mkEnum "pkt_type" {
+    host.value = 0;
+    unicast.value = 0;
+    broadcast.value = 1;
+    multicast.value = 2;
+    other.value = 3;
   };
-  days = builtins.mapAttrs (k: v: k) {
-    Sunday = 0;
-    Monday = 1;
-    Tuesday = 2;
-    Wednesday = 3;
-    Thursday = 4;
-    Friday = 5;
-    Saturday = 6;
+  days = mkEnum "day" {
+    Sunday.value = 0;
+    Monday.value = 1;
+    Tuesday.value = 2;
+    Wednesday.value = 3;
+    Thursday.value = 4;
+    Friday.value = 5;
+    Saturday.value = 6;
   };
   connectionStates' = {
     close.proto = "tcp";
@@ -3739,12 +4045,14 @@ in rec {
       icmpCodes icmpTypes icmpv6Codes icmpv6Types icmpxCodes ifaceTypes igmpTypes
       inetProtos ipOptionFields ipOptions ipsecDirs ipsecKeys isValidExpr
       logFlags logLevels metaKeys mhTypes missing
-      natFlags natTypeFlags nfprotoTypes nftTypes ngModes operators osfKeys osfTtl
+      natFlags natTypeFlags nfProtos nftTypes ngModes operators osfKeys osfTtl
       payloadBases payloadFields payloadProtocols pktTypes priorities
       queueFlags rateUnits rejectTypes rtKeys
       sctpChunkFields sctpChunks setFlags setOperations setPolicies setReference socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
       udpConnectionStates wildcard xtTypes;
+    inherit exprEnums exprEnumsRec innerExprs innerExprsRec;
+    dccpPkttypes = dccpPktTypes;
     # "time to lives" doesn't sound good but add an alias anyway for consistency
     osfTtls = osfTtl;
     # "days" isn't very descriptive, so here's an alias

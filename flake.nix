@@ -9,7 +9,7 @@
       });
     in
     {
-      nixosModules.default = ./.;
+      nixosModules.default = import ./.;
       # this isn't an officially supported third-party flake output
       # homeManagerModules.default = ./.;
       lib = forEachSystem ({ pkgs, ... }: (import ./. { inherit pkgs; inherit (pkgs) lib; }).config.notlua);
