@@ -414,7 +414,7 @@ let
         value = toString def.value;
       }) defs));
     };
-    mkTableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false }:
+    mkTableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
       req = x: builtins.elem x reqFields;
       mkOpt = x: if req x then lib.mkOption else mkNullOption;
@@ -434,7 +434,12 @@ let
           type = lib.types.int;
           description = lib.mdDoc "The table’s handle. In input, it is used only in **delete** command as alternative to **name**.";
         };
-      } else {});
+      } else { }) // (if withExtraFields then builtins.mapAttrs mkOpt {
+        comment = {
+          type = lib.types.str;
+          description = "Undocumented upstream";
+        };
+      } else { });
     };
     mkChainType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withNewName ? false, withExtraFields ? false }:
     let
@@ -476,6 +481,10 @@ let
         policy = {
           type = types.chainPolicy;
           description = "The chain’s policy.";
+        };
+        comment = {
+          type = lib.types.str;
+          description = "Undocumented upstream";
         };
       } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
         handle = {
@@ -1358,6 +1367,7 @@ let
       withHandle = true;
     };
     # anything but delete
+    tableToAdd = mkTableType { reqFields = [ "name" "family" ]; withExtraFields = true; };
     tableToWhatever = mkTableType { reqFields = [ "name" "family" ]; };
     chainToAdd = mkChainType {
       finalMerge = x:
@@ -1727,6 +1737,30 @@ let
         # synproxy = types.synproxyToWhatever;
       };
     };
+    destroyCommand = oneOf' {
+      name = "nftablesDestroyCommand";
+      description = "nftables destroy command";
+      types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
+        type = v;
+        description = "Destroy ${k}.";
+      })) {
+        table = types.tableToDelete;
+        chain = types.chainToDelete;
+        rule = types.ruleToWhatever;
+        set = types.setToDelete;
+        map = types.mapToDelete;
+        element = types.elementToWhatever;
+        flowtable = types.flowtableToDelete;
+        counter = types.counterToDelete;
+        quota = types.quotaToDelete;
+        secmark = types.secmarkToDelete;
+        "ct helper" = types.ctHelperToWhatever;
+        limit = types.limitToDelete;
+        "ct timeout" = types.ctTimeoutToDelete;
+        "ct expectation" = types.ctExpectationToDelete;
+        # synproxy = types.synproxyToWhatever;
+      };
+    };
     null = lib.mkOptionType {
       name = "null";
       descriptionClass = "noun";
@@ -1840,6 +1874,10 @@ let
         delete = {
           type = types.deleteCommand;
           description = lib.mdDoc "Delete an object from the ruleset. Only the minimal number of properties required to uniquely identify an object is generally needed in *ADD_OBJECT*. For most ruleset elements, this is **family** and **table** plus either **handle** or **name** (except rules since they don’t have a name).";
+        };
+        destroy = {
+          type = types.destroyCommand;
+          description = "Undocumented upstream";
         };
         list = {
           type = types.listCommand;
@@ -2735,6 +2773,12 @@ let
         type = types.osfTtl;
       };
     };
+    dccpOption = submodule' {
+      options.type = lib.mkOption {
+        description = "DCCP option type.";
+        type = lib.types.int;
+      };
+    };
     dslExprHackType = submodule' {
       skipNulls = false;
       finalMerge = x: x.__expr__;
@@ -2909,6 +2953,14 @@ let
         ipsec = {
           type = types.ipsecExpression;
           description = "Undocumented upstream";
+        };
+        "dccp option" = {
+          type = types.dccpOption;
+          description = lib.mdDoc ''
+            Create a reference to a DCCP option (**type**).
+
+            The expression is to be used as a DCCP option existence check in a **match** statement with a boolean on the right hand side.
+          '';
         };
       });
     } // attrs);
@@ -3086,7 +3138,7 @@ let
     oiftype.type = iface_type;
     skuid.type = uid;
     skgid.type = gid;
-    nftrace.type = integer 1;
+    nftrace.type = boolean; # integer 1;
     rtclassid.type = realm;
     ibrname.type = ifname;
     obrname.type = ifname;
@@ -3107,7 +3159,7 @@ let
     secmark = { qualified = true; type = integer 32; };
     sdif.type = iface_index;
     sdifname.type = ifname;
-    broute.type = integer 1;
+    broute.type = boolean; # integer 1;
   }; in self // {
     # technically those aliases are supported by nftables code, but if they are aliases anyway
     # i might as well make them proper aliases in nix code as well
@@ -3161,6 +3213,7 @@ let
   };
   setFlags = mkEnum "setFlags" {
     constant = {};
+    dynamic = {};
     interval = {};
     timeout = {};
   };

@@ -1,4 +1,3 @@
-# disable convenience functors in test to allow serializing intermediate state to json
 { lib, notnft }:
 
 let
@@ -457,26 +456,45 @@ self = rec {
   };
   dup = attrs: { dup = attrs; };
   cidr = addr: len: { prefix = { inherit addr len; }; };
-  # TODO: pass flags and type_flags if closure
-  snat = x: if builtins.isAttrs x then { snat = x; } else {
+  snat = x: if builtins.isAttrs x then ({ family ? null, flags ? null, type_flags ? null, ... } @ attrs: {
+    snat = attrs
+      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { })
+      // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
+      // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
+  }) x else {
     __expr__.snat.addr = x;
-    __functor = self: attrs: { snat = { addr = x; } // attrs; };
+    __functor = self: attrs: snat ({ addr = x; } // attrs);
   };
-  dnat = x: if builtins.isAttrs x then { dnat = x; } else {
+  dnat = x: if builtins.isAttrs x then ({ family ? null, flags ? null, type_flags ? null, ... } @ attrs: {
+    dnat = attrs
+      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { })
+      // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
+      // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
+  }) x else {
     __expr__.dnat.addr = x;
-    __functor = self: attrs: { dnat = { addr = x; } // attrs; };
+    __functor = self: attrs: dnat ({ addr = x; } // attrs);
   };
   masquerade = {
     __expr__.masquerade = { };
-    __functor = self: attrs: {
-      masquerade = self.__expr__.masquerade // attrs;
-    };
+    __functor = self: x: if builtins.isInt x then {
+      __expr__.masquerade.port = x;
+      __functor = self: attrs: masquerade ({ port = x; } // attrs);
+    } else ({ flags ? null, type_flags ? null, ... } @ attrs: {
+      masquerade = attrs
+        // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
+        // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
+    }) x;
   };
   redirect = {
     __expr__.redirect = { };
-    __functor = self: attrs: {
-      masquerade = self.__expr__.redirect // attrs;
-    };
+    __functor = self: x: if builtins.isInt x then {
+      __expr__.redirect.port = x;
+      __functor = self: attrs: redirect ({ port = x; } // attrs);
+    } else ({ flags ? null, type_flags ? null, ... } @ attrs: {
+      redirect = attrs
+        // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
+        // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
+    }) x;
   };
   reject = {
     __expr__.reject = { };
@@ -556,6 +574,9 @@ self = rec {
   # reset tcp option
   reset = opt: {
     reset = opt;
+  };
+  dccpOpt = type: {
+    "dccp option" = { inherit type; };
   };
   # set secmark or whatever?
   secmark = secmark: { inherit secmark; };
