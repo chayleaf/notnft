@@ -27,7 +27,7 @@ let
   fixupStmts = stmts:
     if builtins.isList stmts then map fixupStmts stmts
     else if !(builtins.isAttrs stmts) then stmts
-    else if stmts?__expr__ then stmts.__expr__
+    else if stmts?__expr__ then fixupStmts stmts.__expr__
     else if builtins.any (lib.hasPrefix "_") (builtins.attrNames stmts) then stmts
     else builtins.mapAttrs (k: fixupStmts) stmts;
 self = rec {
@@ -35,18 +35,19 @@ self = rec {
   # compile just extracts the list from the dsl
   compile = x: toList x;
   Ruleset = x: { nftables = passNames x; };
-  Table = { family ? null, name ? null } @ attrs':
+  Table = { family ? null, name ? null, existing ? false } @ attrs':
     let attrs = if builtins.isFunction family then attrs' // {
       family = family notnft.families;
     } else attrs'; in
     if !attrs?name || !attrs?family then takeArgs Table attrs
     else special {
-      __list__ = [ { add.table = attrs; } ];
+      __list__ = if existing then [] else [ { add.table = builtins.removeAttrs attrs [ "existing" ]; } ];
       __functor = self: obj:
         self // {
           __list__ = self.__list__ ++ (passNamesAnd { table = name; inherit family; } obj);
         };
     };
+  ExistingTable = Table { existing = true; };
   Chain' = {
     family ? null
     , table ? null
@@ -56,6 +57,9 @@ self = rec {
     , prio ? null
     , dev ? null
     , policy ? null
+    , existing ? false
+    # insert (prepend) rules instead of adding (append)
+    , prepend ? false
   } @ attrs': 
     let attrs = attrs' // (if builtins.isFunction family then {
       family = family notnft.families;
@@ -71,39 +75,51 @@ self = rec {
     } else {}); in
     if !attrs?name || !attrs?family || !attrs?table then takeArgs Chain' attrs
     else {
-      __list__ = [ { add.chain = attrs; } ];
+      __list__ = if existing then [ ] else [ { add.chain = builtins.removeAttrs attrs [ "prepend" "existing" ]; } ];
       __functor = self: obj:
         if builtins.isList obj && obj != [] && builtins.isList (builtins.head obj) then builtins.foldl' lib.id self obj
         else self // {
           __list__ =
-            let obj' =
-              if builtins.isList obj
-              then builtins.foldl' lib.id (Rule' { chain = name; inherit family table; }) obj
-              else obj;
-            in self.__list__ ++ (passInfo obj' { chain = name; inherit family table; });
+            let
+              obj' =
+                if builtins.isList obj
+                then builtins.foldl' lib.id (Rule' { chain = name; inherit family table prepend; }) obj
+                else obj;
+              obj'' = toList (passInfo obj' { chain = name; inherit family table; });
+            in
+              if prepend && existing then obj'' ++ self.__list__
+              else if prepend then [ (builtins.head self.__list__) ] ++ obj'' ++ builtins.tail self.__list__
+              else self.__list__ ++ obj'';
         };
     };
-  Chain = Chain' {};
+  Chain = Chain' { };
+  ExistingChain = Chain' { existing = true; };
+  InsertExistingChain = Chain' { existing = true; insert = true; };
   Rule' = {
     family ? null
     , table ? null
     , chain ? null
     , comment ? null
+    , prepend ? false
   } @ attrs': 
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
+    let
+      attrs = if builtins.isFunction family then attrs' // {
+        family = family notnft.families;
+      } else attrs';
+      cmd = if prepend then "insert" else "add";
+    in
     if !attrs?chain || !attrs?family || !attrs?table then takeArgs Rule' attrs
     else {
-      add.rule = attrs; 
+      ${cmd}.rule = builtins.removeAttrs attrs [ "prepend" ];
       __functor = self: obj:
         self // {
-          add.rule = self.add.rule // {
-            expr = (self.add.rule.expr or []) ++ (toList (fixupStmts obj));
+          ${cmd}.rule = self.${cmd}.rule // {
+            expr = (self.${cmd}.rule.expr or []) ++ (toList (fixupStmts obj));
           };
         };
       };
   Rule = Rule' {};
+  InsertRule = Rule' { insert = true; };
   Set = {
     family ? null
     , table ? null
@@ -305,13 +321,20 @@ self = rec {
         __expr__."tcp option".name = opt;
       })
     notnft.tcpOptions;
-    op = lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: a:
-      if builtins.isList a && builtins.length a >= 2 then builtins.foldl' (a: b: {
-        ${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
-      }) (builtins.head a) (builtins.tail a)
-      else b: {
-        ${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
-      });
+  bit = let
+    self = (lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: let fn = (a: b: {
+      __expr__.${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
+      __functor = self: fn self.__expr__;
+    }); in fn));
+  in self // rec {
+    or = self."|";
+    xor = self."^";
+    and = self."&";
+    lsh = self."<<";
+    rsh = self.">>";
+    lshift = lsh;
+    rshift = lsh;
+  };
   meta = builtins.mapAttrs (_: key: {
     meta.key = key;
   }) notnft.metaKeys;

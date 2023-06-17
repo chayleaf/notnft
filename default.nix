@@ -3611,11 +3611,13 @@ let
     id = ff;
   };
   operators' = mkEnum "operators" {
-    "&" = { };
-    "|" = { };
-    "^" = { };
-    "<<" = { };
-    ">>" = { };
+    # documented as supported, but probably doesn't make much sense
+    # (this is for the match *statement*)
+    # "&" = { };
+    # "|" = { };
+    # "^" = { };
+    # "<<" = { };
+    # ">>" = { };
     "==" = { };
     "!=" = { };
     "<" = { };
@@ -3627,19 +3629,19 @@ let
   };
   operators = operators' // {
     # create some aliases
-    and = operators'."&";
-    or = operators'."|";
-    xor = operators'."^";
-    lsh = operators'."<<";
-    rsh = operators'.">>";
+    # and = operators'."&";
+    # or = operators'."|";
+    # xor = operators'."^";
+    # lsh = operators'."<<";
+    # rsh = operators'.">>";
     eq = operators'."==";
     ne = operators'."!=";
     lt = operators'."<";
     gt = operators'.">";
     le = operators'."<=";
     ge = operators'.">=";
-    IN = operators'."in";
-    in' = operators'."in";
+    # IN = operators'."in";
+    # in' = operators'."in";
     auto = operators."in";
     au = operators."in";
     implicit = operators'."in";

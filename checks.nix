@@ -314,9 +314,9 @@ assert (lib.trace "val" lib.traceVal (flake.exprEnumsMerged dsl.payload.tcp.flag
 assert chkTypeJson types.ruleset (with flake.dsl.payload; with flake.dsl; Ruleset {
   filter = Table { family = f: f.netdev; } {
     ingress_common = Chain 
-      [(is.eq (op."&" tcp.flags (f: op."|" f.fin f.syn)) (f: op."|" f.fin f.syn)) drop]
-      [(is.eq (op."&" tcp.flags (f: op."|" f.syn f.rst)) (f: op."|" f.syn f.rst)) drop]
-      [(is.eq (op."&" tcp.flags (f: with f; op."|" [ fin syn rst psh ack urg ])) 0) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
+      [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
       [(is.auto tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]
@@ -349,7 +349,7 @@ assert chkTypeJson types.ruleset (with flake.dsl.payload; with flake.dsl; Rulese
       [accept];
     inbound = Chain { type = f: f.filter; hook = f: f.input; prio = f: f.filter; policy = f: f.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
-      [(is.eq (op."&" tcp.flags (f: f.syn)) 0) (is.eq ct.state (f: f.new)) drop]
+      [(is.eq (bit.and tcp.flags (f: f.syn)) 0) (is.eq ct.state (f: f.new)) drop]
       [(vmap meta.iifname { lo = accept; wan0 = jump "inbound_wan"; lan0 = jump "inbound_lan"; })];
     forward = Chain { type = f: f.filter; hook = f: f.forward; prio = f: f.filter; policy = f: f.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]

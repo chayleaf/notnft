@@ -56,14 +56,14 @@ Ruleset {
       # is.eq is an alias for the match statement with the == operator
       # tcp.flags is the same as "tcp flags" in nftables language,
       # and accesses the field "flags" of "tcp" payload
-      [(is.eq (op."&" tcp.flags (f: op."|" f.fin f.syn)) (f: op."|" f.fin f.syn)) drop]
-      [(is.eq (op."&" tcp.flags (f: op."|" f.syn f.rst)) (f: op."|" f.syn f.rst)) drop]
-      [(is.eq (op."&" tcp.flags (f: with f; op."|" [ fin syn rst psh ack urg ])) 0) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
+      [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
       # In the nftables language, you often see stuff like
       # "tcp flags syn" to check if syn is set in tcp flags, not using
-      # any operator between the two values. The same # logic is
-      # available in notnft via "is.auto" for automatically figuring out
-      # the operation to do.
+      # any operator between the two values. The same logic is available
+      # in notnft via "is.auto" (or "is.au") for automatically inferring
+      # the operation.
       # tcpOpt is for getting the value of a tcp option field
       # (or checking for presence of a tcp option)
       [(is.auto tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
@@ -103,7 +103,7 @@ Ruleset {
 
     inbound = Chain { type = f: f.filter; hook = f: f.input; prio = f: f.filter; policy = f: f.drop; }
       [(vmap ct.state { established = accept; related = accept; invalid = drop; })]
-      [(is.eq (op."&" tcp.flags (f: f.syn)) 0) (is.eq ct.state (f: f.new)) drop]
+      [(is.eq (bit.and tcp.flags (f: f.syn)) 0) (is.eq ct.state (f: f.new)) drop]
       [(vmap meta.iifname { lo = accept; wan0 = jump "inbound_wan"; lan0 = jump "inbound_lan"; })];
 
     forward = Chain { type = f: f.filter; hook = f: f.forward; prio = f: f.filter; policy = f: f.drop; }
@@ -143,3 +143,9 @@ Ruleset {
   };
 }
 ```
+
+You can use `ExistingChain` or `ExistingTable` if you want to extend an
+existing chain/table without issuing a command for creating it.
+
+TODO: figure out the best way to flush tables before adding rules and
+using create instead of add in some cases
