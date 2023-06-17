@@ -290,17 +290,35 @@ self = rec {
       inherit op left;
       right =
         if builtins.isFunction right
-        then right (lib.traceVal (notnft.exprEnumsMerged left))
+        then right (notnft.exprEnumsMerged left)
         else right;
     };
   }) notnft.operators;
   is = match;
-  ct = builtins.mapAttrs (_: key: {
-    __expr__.ct.key = key;
-    __functor = self: attrs: {
-      ct = self.ct // attrs;
-    };
-  }) notnft.ctKeys;
+
+  ct = (builtins.mapAttrs (_: key: {
+    ct.key = key;
+  }) (lib.filterAttrs (k: v: (v.dir or true) != true && (v.family or true) != true) notnft.ctKeys)) // (lib.genAttrs [ "original" "reply" ] (dir':
+    let dir = notnft.ctDirs.${dir'}; in (builtins.mapAttrs (_: key: {
+      ct = { inherit key dir; };
+    }) (lib.filterAttrs (k: v: (v.dir or true) != false && (v.family or true) != true) notnft.ctKeys)) // {
+      ip.saddr.ct = { key = notnft.ctKeys."ip saddr"; inherit dir; };
+      ip6.saddr.ct = { key = notnft.ctKeys."ip6 saddr"; inherit dir; };
+      ip.daddr.ct = { key = notnft.ctKeys."ip daddr"; inherit dir; };
+      ip6.daddr.ct = { key = notnft.ctKeys."ip6 daddr"; inherit dir; };
+    }));
+
+  numgen = builtins.mapAttrs (_: mode: attrs: ({ mod, offset ? null } @ attrs: {
+    numgen = attrs // { inherit mode; };
+  }) (if builtins.isAttrs attrs then attrs else { mod = attrs; })) notnft.ngModes;
+
+  jhash = expr: attrs: ({ mod, offset ? null, seed ? null } @ attrs: {
+    jhash = attrs // { inherit expr; };
+  }) (if builtins.isAttrs attrs then attrs else { mod = attrs; });
+  symhash = attrs: ({ mod, offset ? null } @ attrs: {
+    symhash = attrs;
+  }) (if builtins.isAttrs attrs then attrs else { mod = attrs; });
+
   payload = builtins.mapAttrs
     (_: proto:
       (builtins.mapAttrs (field: _: {
@@ -321,6 +339,42 @@ self = rec {
         __expr__."tcp option".name = opt;
       })
     notnft.tcpOptions;
+  ipOpt = builtins.mapAttrs
+    (_: opt:
+      (builtins.mapAttrs (field: _: {
+        "ip option" = {
+          name = opt;
+          field = notnft.ipOptionFields.${field};
+        };
+      }) opt.fields) // {
+        __expr__."ip option".name = opt;
+      })
+    notnft.ipOptions;
+  sctpChunk = builtins.mapAttrs
+    (_: chunk:
+      (builtins.mapAttrs (field: _: {
+        "sctp chunk" = {
+          name = chunk;
+          field = notnft.sctpChunkFields.${field};
+        };
+      }) chunk.fields) // {
+        __expr__."sctp chunk".name = chunk;
+      })
+    notnft.sctpChunks;
+  exthdr = builtins.mapAttrs
+    (_: hdr:
+      (builtins.mapAttrs (field: _: let val = {
+        exthdr = {
+          name = hdr;
+          field = notnft.exthdrFields.${field};
+        };
+      }; in if field == "rt0" then {
+        __expr__ = val;
+        __functor = self: offset: self.__expr__ // { inherit offset; };
+      } else val) hdr.fields) // {
+        __expr__."tcp option".name = hdr;
+      })
+    notnft.exthdrs;
   bit = let
     self = (lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: let fn = (a: b: {
       __expr__.${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
@@ -338,6 +392,31 @@ self = rec {
   meta = builtins.mapAttrs (_: key: {
     meta.key = key;
   }) notnft.metaKeys;
+  socket = builtins.mapAttrs (_: key: {
+    socket.key = key;
+  }) notnft.socketKeys;
+  rt = (builtins.mapAttrs (_: key: {
+    rt.key = key;
+  }) notnft.rtKeys) // (lib.genAttrs [ "ip" "ip6" ] (family:
+    builtins.mapAttrs (_: key: {
+      rt = { inherit key family; };
+    }) notnft.rtKeys));
+  osf = (builtins.mapAttrs (_: key: {
+    osf.key = key;
+  }) notnft.osfKeys) // (let ttl = builtins.mapAttrs (_: ttl: builtins.mapAttrs (_: key: {
+    osf = { inherit ttl key; };
+  }) notnft.osfKeys) notnft.osfTtls; in ttl // { inherit ttl; });
+  ipsec = lib.genAttrs [ "in" "out" ] (dir': let dir = notnft.ipsecDirs.${dir'}; in (builtins.mapAttrs (_: key: {
+    __expr__.ipsec = { inherit key dir; };
+    __functor = self: attrs: self.__expr__ // {
+      ipsec = self.__expr__.ipsec // attrs;
+    };
+  }) (lib.filterAttrs (k: v: !(v.needsFamily or false)) notnft.ipsecKeys)) // (lib.genAttrs [ "ip" "ip6" ] (family: builtins.mapAttrs (_: key: {
+    __expr__.ipsec = { inherit key dir family; };
+    __functor = self: attrs: self.__expr__ // {
+      ipsec = self.__expr__.ipsec // attrs;
+    };
+  }) (lib.filterAttrs (k: v: v.needsFamily or false) notnft.ipsecKeys))));
   accept = { accept = null; };
   drop = { drop = null; };
   continue = { continue = null; };
@@ -353,17 +432,57 @@ self = rec {
         let result = if builtins.isFunction result' then result' notnft.fibResults else result'; in
         { fib = { inherit flags result; }; };
   # anonymous set
-  set = x: { set = x; };
-  limit = attrs @ { per ? null, ... }: {
-    limit = attrs // (if builtins.isFunction per then {
-      per = per notnft.timeUnits;
-    } else {});
+  set = {
+    add = set: elem: { set = { op = notnft.setOps.add; inherit set elem; }; };
+    update = set: elem: { set = { op = notnft.setOps.update; inherit set elem; }; };
+    delete = set: elem: { set = { op = notnft.setOps.delete; inherit set elem; }; };
+    __functor = self: x: { set = x; };
   };
+  map = key: data: {
+    map = {
+      inherit key;
+      data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
+    };
+  };
+  limit = attrs @ { per ? null, ... }: {
+    limit = attrs
+      // (if builtins.isFunction per then { per = per notnft.timeUnits; } else {});
+  };
+  fwd = { family ? null, ... } @ attrs: {
+    fwd = attrs
+      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { });
+  };
+  notrack = {
+    notrack = null;
+  };
+  dup = attrs: { dup = attrs; };
   cidr = addr: len: { prefix = { inherit addr len; }; };
+  # TODO: pass flags and type_flags if closure
+  snat = x: if builtins.isAttrs x then { snat = x; } else {
+    __expr__.snat.addr = x;
+    __functor = self: attrs: { snat = { addr = x; } // attrs; };
+  };
+  dnat = x: if builtins.isAttrs x then { dnat = x; } else {
+    __expr__.dnat.addr = x;
+    __functor = self: attrs: { dnat = { addr = x; } // attrs; };
+  };
   masquerade = {
     __expr__.masquerade = { };
     __functor = self: attrs: {
-      masquerade = self.masquerade // attrs;
+      masquerade = self.__expr__.masquerade // attrs;
+    };
+  };
+  redirect = {
+    __expr__.redirect = { };
+    __functor = self: attrs: {
+      masquerade = self.__expr__.redirect // attrs;
+    };
+  };
+  reject = {
+    __expr__.reject = { };
+    __functor = self: { type ? null, ... }:  {
+      reject = self.__expr__.reject
+        // (if builtins.isFunction type then { type = type notnft.rejectTypes; } else { });
     };
   };
   vmap = key: data: {
@@ -372,6 +491,73 @@ self = rec {
       data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
     };
   };
-  mangle = key: value: { mangle = { inherit key value; }; };
+  elem = attrs:
+    if attrs?val || attrs?timeout || attrs?expires || attrs?comment then
+      (if attrs?val then {
+        elem = attrs;
+      } else val: {
+        elem = attrs // { inherit val; };
+      })
+    else attrs': {
+      elem = (attrs' // { val = attrs; });
+    };
+  mangle = key: value: { mangle = {
+    inherit key;
+    value = if builtins.isFunction value then value (notnft.exprEnumsMerged key) else value;
+  }; };
+  concat = exprs: {
+    __expr__.concat = lib.toList exprs;
+    __functor = self: x: self // {
+      __expr__.concat = self.__expr__.concat ++ lib.toList x;
+    };
+  };
+  counter = {
+    __expr__.counter = { };
+    __functor = self: attrs: { counter = attrs; };
+  };
+  quota = { val_unit ? null, used_unit ? null, ... } @ attrs: {
+    quota = attrs
+      // (if builtins.isFunction val_unit then { val_unit = val_unit notnft.byteUnits; } else { })
+      // (if builtins.isFunction used_unit then { used_unit = used_unit notnft.byteUnits; } else { });
+  };
+  log = { level ? null, flags ? null, ... }@ attrs: {
+    log = attrs
+      // (if builtins.isFunction level then { level = level notnft.logLevels; } else { })
+      // (if builtins.isFunction flags then { flags = flags notnft.logFlags; } else { });
+  };
+  # ct helper set
+  ctHelper = expr: { "ct helper" = expr; };
+  meter = attrs: { meter = attrs; };
+  ctCount = attrs: { "ct count" = if builtins.isInt attrs then { val = attrs; } else attrs; };
+  ctTimeout = attrs: { "ct timeout" = attrs; };
+  ctExpectation = attrs: { "ct expectation" = attrs; };
+  xt = attrs: { xt = attrs; };
+  flow.add = name: {
+    flow = {
+      op = notnft.flowtableOps.add;
+      inherit name;
+    };
+  };
+  queue = {
+    __expr__ = { queue = { }; };
+    __functor = self: { flags ? null, ... } @ attrs: {
+      queue = attrs
+        // (if builtins.isFunction flags then { flags = flags notnft.queueFlags; } else { });
+    };
+  };
+  tproxy = { family ? null, ... } @ attrs: {
+    tproxy = attrs //
+      (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { });
+  };
+  synproxy = { flags ? null, ... } @ attrs: {
+    synproxy = attrs //
+      (if builtins.isFunction flags then { flags = flags notnft.synproxyFlags; } else { });
+  };
+  # reset tcp option
+  reset = opt: {
+    reset = opt;
+  };
+  # set secmark or whatever?
+  secmark = secmark: { inherit secmark; };
   inherit (notnft) exists missing;
 }; in self

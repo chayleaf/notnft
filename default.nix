@@ -1075,7 +1075,7 @@ let
     ipFamily = mkEnum {
       name = "nftablesIpFamily";
       description = "nftables ip family";
-      enum = lib.filterAttrs (k: v: v.isIp or false) families;
+      enum = ipFamilies;
     };
     chainType = mkEnum {
       name = "nftablesChainType";
@@ -1219,10 +1219,10 @@ let
       description = "nftables reject type";
       enum = rejectTypes';
     };
-    setOperation = mkEnum {
-      name = "nftablesSetOperation";
-      description = "nftables set operation";
-      enum = setOperations;
+    setOp = mkEnum {
+      name = "nftablesSetOp";
+      description = "nftables set op";
+      enum = setOps;
     };
     synproxyFlag = mkEnum {
       name = "nftablesSynproxyFlag";
@@ -1282,7 +1282,7 @@ let
     osfTtl = mkEnum {
       name = "nftablesOsfTtl";
       description = "nftables osf ttl";
-      enum = osfTtl;
+      enum = osfTtls;
     };
     payloadProtocol = mkEnum {
       name = "nftablesPayloadProtocol";
@@ -2063,7 +2063,7 @@ let
           "Reject statement's expression is invalid in this context";
         ret;
       options.type = mkNullOption {
-        type = types.rejectTypes;
+        type = types.rejectType;
         description = lib.mdDoc ''Type of reject, either **"tcp reset"**, **"icmpx"**, **"icmp"** or **"icmpv6"**.'';
       };
       options.expr = mkNullOption {
@@ -2079,7 +2079,7 @@ let
         ret;
       options.op = lib.mkOption {
         description = lib.mdDoc ''Operator on set, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
-        type = types.setOperation;
+        type = types.setOp;
       };
       options.elem = lib.mkOption {
         description = "Set element to add or update.";
@@ -2569,7 +2569,6 @@ let
       options.family = mkNullOption {
         description = "Routing data IP family. This property is optional and defaults to unspecified.";
         type = types.ipFamily;
-        defaultText = lib.literalExpression null;
       };
     };
     ctExpression = submodule' {
@@ -3055,7 +3054,7 @@ let
     # undocumented
     version = {};
   };
-  osfTtl = mkEnum "osfTtl" {
+  osfTtls = mkEnum "osfTtl" {
     loose = {};
     skip = {};
   };
@@ -3151,6 +3150,7 @@ let
       requireBaseChainDevice = true;
     };
   };
+  ipFamilies = lib.filterAttrs (k: v: v.isIp or false) families;
   chainPolicies = mkEnum "chainPolicies" {
     accept = {};
     drop = {};
@@ -3253,16 +3253,17 @@ let
     mbytes = {};
     packets = { onlyRate = true; };
   };
+  byteUnits = lib.filterAttrs (k: v: !(v.onlyRate or false)) rateUnits;
   rejectTypes' = mkEnum "rejectTypes" {
-    icmpx = {};
-    icmp = {};
-    icmpv6 = {};
-    "tcp reset" = {};
+    icmpx = { };
+    icmp = { };
+    icmpv6 = { };
+    "tcp reset" = { };
   };
   rejectTypes = rejectTypes' // {
     tcpReset = rejectTypes'."tcp reset";
   };
-  setOperations = mkEnum "setOperations" {
+  setOps = mkEnum "setOps" {
     add = {};
     update = {};
     delete = {};
@@ -3657,8 +3658,8 @@ let
     # basically, family is only actually used in daddr/saddr
     daddr.needsFamily = true;
     saddr.needsFamily = true;
-    reqid = { };
-    spi = { };
+    reqid.needsFamily = false;
+    spi.needsFamily = false;
   };
   priorities = mkEnum "priorities" {
     raw = {
@@ -4078,22 +4079,20 @@ let
 in rec {
   config.notnft = {
     inherit
-      arpOps booleans chainPolicies chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
+      arpOps booleans byteUnits chainPolicies chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
       days dccpPktTypes dscpTypes ecnTypes etherTypes exists exthdrFields exthdrs
       families fibAddrTypes fibFlags fibResults hooks
       icmpCodes icmpTypes icmpv6Codes icmpv6Types icmpxCodes ifaceTypes igmpTypes
-      inetProtos ipOptionFields ipOptions ipsecDirs ipsecKeys isValidExpr
+      inetProtos ipFamilies ipOptionFields ipOptions ipsecDirs ipsecKeys isValidExpr
       logFlags logLevels metaKeys mhTypes missing
-      natFlags natTypeFlags nfProtos nftTypes ngModes operators osfKeys osfTtl
+      natFlags natTypeFlags nfProtos nftTypes ngModes operators osfKeys osfTtls
       payloadBases payloadFields payloadProtocols pktTypes priorities
       queueFlags rateUnits rejectTypes rtKeys
-      sctpChunkFields sctpChunks setFlags setOperations setPolicies setReference socketKeys synproxyFlags
+      sctpChunkFields sctpChunks setFlags setOps setPolicies setReference socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
       udpConnectionStates wildcard xtTypes;
     inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums;
     dccpPkttypes = dccpPktTypes;
-    # "time to lives" doesn't sound good but add an alias anyway for consistency
-    osfTtls = osfTtl;
     # "days" isn't very descriptive, so here's an alias
     weekDays = days;
     dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };

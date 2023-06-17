@@ -173,7 +173,7 @@ assert fails (chkExpr { socket.key = "not transparent"; });
 # osf expr
 assert chkExpr { osf = { key = "name"; }; };
 assert chkExprJson { osf = { key = flake.osfKeys.name; ttl = "loose"; }; };
-assert chkExprJson { osf = { key = flake.osfKeys.name; ttl = flake.osfTtl.skip; }; };
+assert chkExprJson { osf = { key = flake.osfKeys.name; ttl = flake.osfTtls.skip; }; };
 assert fails (chkExpr { osf = { key = "namee"; }; });
 assert fails (chkExprJson { osf = { key = flake.osfKeys.name; ttl = "abcd"; }; });
 ### STATEMENTS
@@ -310,7 +310,7 @@ assert chkAdd { flowtable = {
 
 
 ### test config (manually converted from my old router)
-assert (lib.trace "val" lib.traceVal (flake.exprEnumsMerged dsl.payload.tcp.flags))?syn;
+assert (flake.exprEnumsMerged dsl.payload.tcp.flags)?syn;
 assert chkTypeJson types.ruleset (with flake.dsl.payload; with flake.dsl; Ruleset {
   filter = Table { family = f: f.netdev; } {
     ingress_common = Chain 
