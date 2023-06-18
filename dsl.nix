@@ -7,7 +7,7 @@ let
     else if !(builtins.isAttrs stmts) then stmts
     else if (stmts.__enumName__ or "") == "oneEnumToRuleThemAll" then throw "Couldn't resolve ${stmts} from One Enum to Rule Them All"
     else if stmts?__expr__ then fixupStmts stmts.__expr__
-    else if builtins.any (lib.hasPrefix "_") (builtins.attrNames stmts) then stmts
+    else if isSpecial stmts then stmts
     else builtins.mapAttrs (k: fixupStmts) stmts;
   enumHacks =
     if hacks then
@@ -23,23 +23,25 @@ let
         if all == [ ] then val
         else enum.${builtins.head all}
     else enum: lib.id;
-  deepFillEnum' = enum: x:
+  deepFillEnum' = enum: x':
+    let x = enumHacks enum x'; in
     if (x.__enumName__ or "") == "oneEnumToRuleThemAll" && enum?${toString x} then enum.${toString x}
     else if builtins.isList x then map (deepFillEnum' enum) x
-    else if builtins.isAttrs x then builtins.mapAttrs (k: v: deepFillEnum' enum (enumHacks enum v)) x
+    else if x?__expr__ then x // { __expr__ = deepFillEnum' enum x.__expr__; }
+    else if builtins.isAttrs x && !(isSpecial x) then builtins.mapAttrs (k: v: deepFillEnum' enum v) x
     else x;
   deepFillEnum = enum: x:
-    if builtins.isFunction x then x enum
+    if builtins.isFunction x then deepFillEnum enum (x enum)
     else deepFillEnum' enum x;
-  fillEnum = enum: x:
+  fillEnum = enum: x':
+    let x = enumHacks enum x'; in
     if builtins.isFunction x then x enum
     else if (x.__enumName__ or "") == "oneEnumToRuleThemAll" then enum.${toString x}
-    else if builtins.isAttrs x then builtins.mapAttrs (k: enumHacks enum) x
     else x;
-  fillEnums = enums: builtins.mapAttrs (k: v:
+  fillEnums = enums: builtins.mapAttrs (k: v':
+    let v = if enums?${k} then enumHacks enums.${k} v' else v'; in
     if builtins.isFunction v then v enums.${k}
     else if (v.__enumName__ or "") == "oneEnumToRuleThemAll" && enums?${k}.${toString v} then enums.${k}.${toString v}
-    else if enums?${k} then enumHacks enums.${k} v
     else v);
   mkObj = name: enums: attrs:
     fillEnums (fillEnum attrs enums) attrs;
