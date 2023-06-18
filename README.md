@@ -33,6 +33,9 @@ changes upstream.
   this is the next project in that "series".
 - Q: Does this have any relation to Non-Fungible Tokens?
 - A: As the name implies, no.
+- Q: What license is this available under?
+- A: GPL2.0-or-later, same as nftables (some parts of nftables are GPL2
+  only though).
 
 ## Example using the "fancy" DSL
 
