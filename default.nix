@@ -1185,7 +1185,7 @@ let
         || (if strictEnums then builtins.elem x (builtins.attrValues flowtablePriorities)
             else builtins.elem x (builtins.attrNames flowtablePriorities) || builtins.elem x (builtins.attrValues flowtablePriorities));
       merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
-        value = if builtins.isInt def.value then def.value else flowtablePriorities.${toString def.value};
+        value = if builtins.isInt def.value then def.value else flowtablePriorities.${toString def.value}.value;
       }) defs);
     };
     chainPriority = lib.mkOptionType {
@@ -3728,7 +3728,7 @@ let
     spi.needsFamily = false;
   };
   flowtablePriorities = mkEnum "flowtablePriorities" {
-    filter = 0;
+    filter.value = 0;
   };
   chainPriorities = mkEnum "chainPriorities" {
     raw = {
@@ -4092,7 +4092,7 @@ let
     inreply.value = 2304;
     nak.value = 2560;
   };
-  ifaceTypes = mkEnum {
+  ifaceTypes = mkEnum "iface_type" {
     ether.value = 1;
     ppp.value = 512;
     ipip.value = 768;
@@ -4141,8 +4141,8 @@ let
     unreplied.proto = "udp";
   };
   connectionStates = builtins.mapAttrs (k: v: k) connectionStates';
-  tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp"));
-  udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp"));
+  tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp") connectionStates');
+  udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp") connectionStates');
   wildcard = "*";
   setReference = s: "@${s}";
 in rec {
@@ -4160,7 +4160,7 @@ in rec {
       sctpChunkFields sctpChunks setFlags setKeyTypes setOps setPolicies setReference socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
       udpConnectionStates wildcard xtTypes;
-    inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums;
+    inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums mkEnum;
     dccpPkttypes = dccpPktTypes;
     # "days" isn't very descriptive, so here's an alias
     weekDays = days;

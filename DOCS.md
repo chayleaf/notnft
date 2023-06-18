@@ -20,6 +20,47 @@ You are expected to read this after reading the comments in the sample
 in [README.md](./README.md). Additionally, prior experience with
 nftables is strongly recommended.
 
+## Enums
+
+Nftables has many "constants", where you can use a string to refer to a
+specific value. I call them enums. For example, you can use `"syn"` to
+refer to the TCP flag `syn`.
+
+If you don't want to use strings, you can use my premade enum objects.
+
+For example, `notnft.tcpFlags.syn` refers to the `syn` tcp flag. But
+this is quite bulky and hard to remember. Instead, anywhere you would
+use an enum, you can use a function that takes that enum! For example,
+instead of doing `bit.and payload.tcp.flags notnft.tcpFlags.syn`, you
+can do `bit.and payload.tcp.flags (f: f.syn)`.
+
+### One Enum to Rule Them All
+
+Additionally, if you find this syntax bulky, I've implemented an
+advanced feature called "One Enum to Rule Them All" (`oneEnum` for
+short). If you do `with oneEnumToRuleThemAll;`, you can simply use
+whatever constants you please, the DSL will automatically detect wrongly
+used values. However, be aware that
+
+1. Some values (like `add` or `icmp` or `redirect`) can't be added to
+   One Enum, because they would clash with DSL's own values. However, in
+   order to get this feature to work, certain hacks are applied. They
+   are disabled by default, but enabled if you do `with
+   oneEnumToRuleThemAll;`
+   - Specifically, `oneEnumToRuleThemAll` contains a copy of the DSL
+     with hacks enabled (if you do `with dsl;` after
+     `with oneEnumToRuleThemAll;`, the hacks will be disabled, but One
+     Enum might not work as well).
+   - I think it's fairly unlikely that those hacks will break anything,
+     but use them at your own risk!
+2. You will not get the exact place where you used the wrong value
+   in error messages if you do this.
+3. The enum may pollute the namespace, as there really are a lot of
+   differently named constants in nftables.
+
+Example:
+`with dsl.oneEnum; bit.or payload.tcp.flags fin syn rst psh ack urg`
+
 ## Commands
 
 - `create` - make sure something doesnt already exist and create it

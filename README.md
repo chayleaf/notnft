@@ -50,6 +50,8 @@ with notnft.dsl; with payload; ruleset {
   # info back to the user I have to use lambdas.
   # Of course, you can simply use strings instead (e.g. "netdev"), but
   # that way you won't be aware of typos/wrongly used values.
+  # There's an advanced feature called "One Enum to Rule Them All" if
+  # you find this syntax bulky. See docs for more info.
   filter = add table { family = f: f.netdev; } {
     # chains are created by adding lists of statements to them, one list
     # for each rule. You can alternatively pass a list of lists, in that

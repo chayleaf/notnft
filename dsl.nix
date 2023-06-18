@@ -1,17 +1,48 @@
-{ lib, notnft }:
+{ lib, notnft, hacks ? false }:
 
 let
   isSpecial = x: builtins.isAttrs x && builtins.any (lib.hasPrefix "__") (builtins.attrNames x);
   fixupStmts = stmts:
     if builtins.isList stmts then map fixupStmts stmts
     else if !(builtins.isAttrs stmts) then stmts
+    else if (stmts.__enumName__ or "") == "oneEnumToRuleThemAll" then throw "Couldn't resolve ${stmts} from One Enum to Rule Them All"
     else if stmts?__expr__ then fixupStmts stmts.__expr__
     else if builtins.any (lib.hasPrefix "_") (builtins.attrNames stmts) then stmts
     else builtins.mapAttrs (k: fixupStmts) stmts;
-  fillEnum = enum: x: if builtins.isFunction x then x enum else x;
-  fillEnums = enums: builtins.mapAttrs (k: v: if builtins.isFunction v then v enums.${k} else v);
+  enumHacks =
+    if hacks then
+      enum: val:
+      let
+        filter = lib.filterAttrs (k: v: enum?${k} && v == val);
+        f1 = filter self.payload;
+        f2 = filter self;
+        f3 = filter notnft;
+        f4 = filter { inherit (builtins) map toString; };
+        all = builtins.concatLists (map builtins.attrNames [ f1 f2 f3 f4 ]);
+      in
+        if all == [ ] then val
+        else enum.${builtins.head all}
+    else enum: lib.id;
+  deepFillEnum' = enum: x:
+    if (x.__enumName__ or "") == "oneEnumToRuleThemAll" && enum?${toString x} then enum.${toString x}
+    else if builtins.isList x then map (deepFillEnum' enum) x
+    else if builtins.isAttrs x then builtins.mapAttrs (k: v: deepFillEnum' enum (enumHacks enum v)) x
+    else x;
+  deepFillEnum = enum: x:
+    if builtins.isFunction x then x enum
+    else deepFillEnum' enum x;
+  fillEnum = enum: x:
+    if builtins.isFunction x then x enum
+    else if (x.__enumName__ or "") == "oneEnumToRuleThemAll" then enum.${toString x}
+    else if builtins.isAttrs x then builtins.mapAttrs (k: enumHacks enum) x
+    else x;
+  fillEnums = enums: builtins.mapAttrs (k: v:
+    if builtins.isFunction v then v enums.${k}
+    else if (v.__enumName__ or "") == "oneEnumToRuleThemAll" && enums?${k}.${toString v} then enums.${k}.${toString v}
+    else if enums?${k} then enumHacks enums.${k} v
+    else v);
   mkObj = name: enums: attrs:
-    fillEnums (fillEnum attrs (fillEnum attrs enums)) attrs;
+    fillEnums (fillEnum attrs enums) attrs;
   # takeAttrs = names: lib.filterAttrs (k: v: builtins.elem k names);
   finalize = attrs: x:
     if x?__finalize then x.__finalize x attrs
@@ -19,18 +50,18 @@ let
   mkCmd = cmd': obj0:
     if obj0 == self.existing then obj0: mkCmd cmd' (obj0 // { __existing__ = true; _ = null; }) else (let
       family = { family = notnft.families; };
-      family2 = { type, ... }:
+      family2 = { type ? null, ... }: if type == null then family else (
       let
         t = notnft.chainTypes.${toString (fillEnum notnft.chainTypes type)};
         families = if t?families then lib.filterAttrs (k: v: builtins.elem k t.families) notnft.families else notnft.families;
-      in { family = families; };
+      in { family = families; });
       ctype = { type = notnft.chainTypes; };
       hook = { hook = notnft.hooks; };
-      hook2 = { type, ... }:
+      hook2 = { type ? null, ... }: if type == null then hook else (
       let
         t = notnft.chainTypes.${toString (fillEnum notnft.chainTypes type)};
         hooks = if t?hooks then lib.filterAttrs (k: v: builtins.elem k t.hooks) notnft.hooks else notnft.hooks;
-      in { hook = hooks; };
+      in { hook = hooks; });
       cpolicy = { policy = notnft.chainPolicies; };
       cprio = { family ? null, hook ? null, ... }:
         let
@@ -159,8 +190,19 @@ let
           ${cmd}.${obj} = initial // fillEnum (initial // args) obj';
         };
       });
-    
+
+  allEnums = lib.filterAttrs (k: v: (builtins.isAttrs v) && (v != { }) && (builtins.head (builtins.attrValues v))?__enumName__) notnft;
+
+  oneEnumToRuleThemAll = notnft.mkEnum
+    "oneEnumToRuleThemAll"
+    (builtins.zipAttrsWith
+      (name: values: { })
+      (map (lib.filterAttrs (k: v: k != "map" && k != "toString" && !notnft?${k} && !self?${k} && !self.payload?${k})) (builtins.attrValues allEnums)))
+  // (import ./dsl.nix { inherit lib notnft; hacks = true; });
 self = rec {
+  inherit oneEnumToRuleThemAll;
+  oneEnum = oneEnumToRuleThemAll;
+
   create = mkCmd "create";
   add = mkCmd "add";
   insert = mkCmd "insert";
@@ -212,7 +254,7 @@ self = rec {
   match = builtins.mapAttrs (_: op: left: right: {
     match = {
       inherit op left;
-      right = fillEnum (notnft.exprEnumsMerged left) right;
+      right = deepFillEnum (notnft.exprEnumsMerged left) right;
     };
   }) notnft.operators // {
     __functor = self: self.auto;
@@ -300,7 +342,7 @@ self = rec {
     notnft.exthdrs;
   bit = let
     self = (lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: let fn = (a: b: {
-      __expr__.${op} = [ a (fillEnum (notnft.exprEnumsMerged a) b) ];
+      __expr__.${op} = [ a (deepFillEnum (notnft.exprEnumsMerged a) b) ];
       __functor = self: fn self.__expr__;
     }); in fn));
   in self // rec {
@@ -349,7 +391,7 @@ self = rec {
   range = a: b: { range = [ a b ]; };
   fib = flags': result':
     let
-      flags = fillEnum notnft.fibFlags flags';
+      flags = deepFillEnum notnft.fibFlags flags';
       result = fillEnum notnft.fibResults result';
     in
       { fib = { inherit flags result; }; };
@@ -455,7 +497,7 @@ self = rec {
     };
   mangle = key: value: { mangle = {
     inherit key;
-    value = fillEnum (notnft.exprEnumsMerged key) value;
+    value = deepFillEnum (notnft.exprEnumsMerged key) value;
   }; };
   concat = exprs: {
     __expr__.concat = lib.toList exprs;

@@ -311,25 +311,25 @@ assert chkAdd { flowtable = {
 
 ### test config (manually converted from my old router)
 assert (flake.exprEnumsMerged dsl.payload.tcp.flags)?syn;
-assert chkTypeJson types.ruleset (with flake.dsl.payload; with flake.dsl; ruleset {
+assert chkTypeJson types.ruleset (with flake.dsl.oneEnumToRuleThemAll; with payload; ruleset {
   filter = add table.netdev {
-    ingress_common = insert chain [
-      [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
-      [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
-      [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
-      [(is tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
+    ingress_common = add chain [
+      [(is.eq (bit.and tcp.flags (bit.or fin syn)) (bit.or fin syn)) drop]
+      [(is.eq (bit.and tcp.flags (bit.or syn rst)) (bit.or syn rst)) drop]
+      [(is.eq (bit.and tcp.flags (bit.or fin syn rst psh ack urg)) 0) drop]
+      [(is tcp.flags syn) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]
-      [(is.eq (fib (f: with f; [ saddr iif ]) (f: f.oif)) missing) drop]
+      [(is.eq (fib [ saddr iif ] oif) missing) drop]
       [return]
     ];
 
-    ingress_lan = add chain { type = f: f.filter; hook = f: f.ingress; dev = "lan0"; prio = -500; policy = f: f.accept; }
+    ingress_lan = add chain { type = filter; hook = ingress; dev = "lan0"; prio = -500; policy = accept; }
       [(jump "ingress_common")];
 
-    ingress_wan = add chain { type = f: f.filter; hook = f: f.ingress; dev = "wan0"; prio = -500; policy = f: f.drop; }
+    ingress_wan = insert chain { type = filter; hook = ingress; dev = "wan0"; prio = -500; policy = f: f.drop; }
       [(jump "ingress_common")]
-      [(is.ne (fib (f: with f; [ daddr iif ]) (f: f.type)) (f: with f; set [ local broadcast multicast ])) drop]
+      [(is.ne (fib [ daddr iif ] (f: f.type)) (f: with f; set [ local broadcast multicast ])) drop]
       [(is.eq ip.protocol (f: f.icmp)) (is.eq icmp.type (f: with f; set [ info-request address-mask-request router-advertisement router-solicitation redirect ])) drop]
       [(is.eq ip6.nexthdr (f: f.ipv6-icmp)) (is.eq icmpv6.type (f: with f; set [ mld-listener-query mld-listener-report mld-listener-reduction nd-router-solicit nd-router-advert nd-redirect router-renumbering ])) drop]
       [(is.eq ip.protocol (f: f.icmp)) (limit { rate = 20; per = f: f.second; }) accept]
