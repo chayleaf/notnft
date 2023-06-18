@@ -31,7 +31,7 @@ let
     else if builtins.isAttrs x && !(isSpecial x) then builtins.mapAttrs (k: v: deepFillEnum' enum v) x
     else x;
   deepFillEnum = enum: x:
-    if builtins.isFunction x then deepFillEnum enum (x enum)
+    if builtins.isFunction x then deepFillEnum' enum (x enum)
     else deepFillEnum' enum x;
   fillEnum = enum: x':
     let x = enumHacks enum x'; in
