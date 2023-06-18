@@ -191,7 +191,7 @@ an expression/statement/command via the DSL without enclosing it in
 calling `builtins.toJSON`, you have to make sure to get rid of that
 "funkiness".
 
-Make sure to call `dsl.fixupStmts` on any expression/statement that
-isn't enclosed in a `table`, or `dsl.compile` on any command (e.g.
-`add table`) that isn't enclosed in a `ruleset`.
+Make sure to call `dsl.compile` on any expression/statement that
+isn't enclosed in a `table`, or on any command (e.g. `add table`) that
+isn't enclosed in a `ruleset`.
 

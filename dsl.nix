@@ -168,7 +168,6 @@ self = rec {
   destroy = mkCmd "destroy";
   flush = mkCmd "flush";
   rename = mkCmd "rename";
-  compile = x: finalize { } x;
   table = {
     __object__ = "table";
     __functor = add;
@@ -528,5 +527,8 @@ self = rec {
     __functor = self: secmark: { inherit secmark; };
   };
   inherit (notnft) exists missing;
-  inherit fixupStmts;
+  compileStmt = fixupStmts;
+  compileExpr = fixupStmts;
+  compileCmd = finalize { };
+  compile = x: if x?__fixup then compileCmd x else fixupStmts x;
 }; in self
