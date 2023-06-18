@@ -43,9 +43,9 @@ changes upstream.
 with notnft.dsl; with payload; ruleset {
   # nftables has a loooot of enums. You can access them directly (e.g.
   # notnft.families.netdev), but it really is hard to remember them all.
-  # While the nftables dsl just dynamically figures out what you wanted
-  # to say, I tried to implement the same logic, but to pass the info
-  # back to the user I have to use lambdas.
+  # While the nftables language just dynamically figures out what you
+  # wanted to say, I tried to implement the same logic, but to pass the
+  # info back to the user I have to use lambdas.
   # Of course, you can simply use strings instead (e.g. "netdev"), but
   # that way you won't be aware of typos/wrongly used values.
   filter = add table { family = f: f.netdev; } {
@@ -62,11 +62,10 @@ with notnft.dsl; with payload; ruleset {
       # In the nftables language, you often see stuff like
       # "tcp flags syn" to check if syn is set in tcp flags, not using
       # any operator between the two values. The same logic is available
-      # in notnft via "is.auto" (or "is.au") for automatically inferring
-      # the operation.
+      # in notnft via "is" for automatically inferring the operation.
       # tcpOpt is for getting the value of a tcp option field
       # (or checking for presence of a tcp option)
-      [(is.auto tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
+      [(is tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]
       [(is.eq (fib (f: with f; [ saddr iif ]) (f: f.oif)) missing) drop]

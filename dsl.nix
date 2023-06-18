@@ -212,7 +212,9 @@ self = rec {
       inherit op left;
       right = fillEnum (notnft.exprEnumsMerged left) right;
     };
-  }) notnft.operators;
+  }) notnft.operators // {
+    __functor = self: self.auto;
+  };
   is = match;
 
   ct = (builtins.mapAttrs (_: key: {

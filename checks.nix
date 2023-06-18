@@ -317,7 +317,7 @@ assert chkTypeJson types.ruleset (with flake.dsl.payload; with flake.dsl; rulese
       [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
       [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
       [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
-      [(is.auto tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
+      [(is tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]
       [(is.eq (fib (f: with f; [ saddr iif ]) (f: f.oif)) missing) drop]
