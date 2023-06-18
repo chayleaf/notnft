@@ -1,3 +1,19 @@
+# Library reference
+
+There are too many enums to list them here, see source code for
+reference.
+
+- `dsl` - the DSL (reference: see [below](#DSL reference))
+- `types` - contains the NixOS option types for the nftables schema
+  - `statement` - a statement
+  - `command` - a command
+  - `ruleset` - a ruleset (a JSON object containing `nftables`)
+  - `expression` - an expression
+  - there's much much more, see code for details
+
+Currently, you can only create JSON rules. Later you may be able to
+compile it to plain nftables.
+
 # DSL reference
 
 You are expected to read this after reading the comments in the sample
@@ -165,4 +181,17 @@ The following statements are supported:
   optional spnum (see nftables man).
 - `dccpOpt <type>` - create a reference to a DCCP option (type is
   numeric)
+
+## Warning
+
+The DSL does some funky stuff behind the scenes, so you can't serialize
+the DSL objects via `builtins.toJSON` as-is, and if you want to create
+an expression/statement/command via the DSL without enclosing it in
+`dsl.ruleset`, whether it's for passing it to the NixOS module system or
+calling `builtins.toJSON`, you have to make sure to get rid of that
+"funkiness".
+
+Make sure to call `dsl.fixupStmts` on any expression/statement that
+isn't enclosed in a `table`, or `dsl.compile` on any command (e.g.
+`add table`) that isn't enclosed in a `ruleset`.
 

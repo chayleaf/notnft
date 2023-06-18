@@ -528,4 +528,5 @@ self = rec {
     __functor = self: secmark: { inherit secmark; };
   };
   inherit (notnft) exists missing;
+  inherit fixupStmts;
 }; in self

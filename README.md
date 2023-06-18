@@ -8,7 +8,7 @@ with more safety and convenience, but you can alternatively simply
 directly follow the official schema if you're more comfortable with
 that.
 
-DSL docs is available in [DOCS.md](./DOCS.md).
+Docs are available in [DOCS.md](./DOCS.md).
 
 nftables' documentation is *really* poor, so to the extent possible I
 collected personal internal documentation in [NOTES.md](./NOTES.md). The
