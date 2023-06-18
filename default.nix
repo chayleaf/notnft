@@ -2020,8 +2020,6 @@ let
         defaultText = lib.literalExpression false;
       };
     };
-    # TODO actually check
-    ipAddr = lib.types.strMatching (x: true);
     fwdStatement = submodule' {
       finalMerge = { dev, ... } @ ret:
         if (ret?family && !ret?addr) || (ret?addr && !ret?family)
