@@ -177,7 +177,10 @@ self = rec {
     __initial__ = { family = v; };
   }) notnft.families;
   tables = { __object__ = "tables"; };
-  existing = { __existing__ = true; };
+  existing = {
+    __existing__ = true;
+    __functor = self: x: mkCmd "add" (self // x);
+  };
   rule = { __object__ = "rule"; };
   rules = { __object__ = "rules"; };
   chain = { __object__ = "chain"; };
