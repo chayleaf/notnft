@@ -3,7 +3,7 @@
 There are too many enums to list them here, see source code for
 reference.
 
-- `dsl` - the DSL (reference: see [below](#DSL reference))
+- `dsl` - the DSL (reference: see [below](#dsl-reference))
 - `types` - contains the NixOS option types for the nftables schema
   - `statement` - a statement
   - `command` - a command
