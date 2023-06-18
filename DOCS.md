@@ -43,14 +43,14 @@ whatever constants you please, the DSL will automatically detect wrongly
 used values. However, be aware that
 
 1. Some values (like `add` or `icmp` or `redirect`) can't be added to
-   One Enum, because they would clash with DSL's own values. However, in
-   order to get this feature to work, certain hacks are applied. They
-   are disabled by default, but enabled if you do `with
-   oneEnumToRuleThemAll;`
+   One Enum, because they would clash with DSL's own values. However, I
+   got it to work anyway using powers of black magic. The black magic
+   is disabled by default, but enabled if you do
+   `with oneEnumToRuleThemAll;`
    - Specifically, `oneEnumToRuleThemAll` contains a copy of the DSL
      with hacks enabled (if you do `with dsl;` after
      `with oneEnumToRuleThemAll;`, the hacks will be disabled, but One
-     Enum might not work as well).
+     Enum will not work as well as it could).
    - I think it's fairly unlikely that those hacks will break anything,
      but use them at your own risk!
 2. You will not get the exact place where you used the wrong value
