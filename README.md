@@ -146,3 +146,119 @@ with notnft.dsl; with payload; ruleset {
 You can use `add existing chain` or `add existing table` if you want to
 extend an existing chain/table without issuing a command for creating
 it.
+
+Equvalent nftables config:
+
+```nftables
+table netdev filter {
+  chain ingress_common {
+    tcp flags & (fin|syn) == (fin|syn) drop
+    tcp flags & (syn|rst) == (syn|rst) drop
+    tcp flags & (fin|syn|rst|psh|ack|urg) == 0 drop
+    tcp flags syn tcp option maxseg size 0-500 drop
+    ip saddr 127.0.0.1 drop
+    ip6 saddr ::1 drop
+    fib saddr . iif oif missing drop
+    return
+  }
+
+  chain ingress_lan {
+    type filter hook ingress device "lan0" priority -500; policy accept;
+    jump ingress_common
+  }
+
+  chain ingress_wan {
+    type filter hook ingress devices = { $EXT } priority -500; policy drop;
+    jump ingress_common
+    fib daddr . iif type != { local, broadcast, multicast } drop
+    ip protocol == icmp icmp type == { info-request, address-mask-request, router-advertisement, router-solicitation, redirect } drop
+    ip6 nexthdr == ipv6-icmp ipv6-icmp type == { mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-redirect, router-renumbering } drop
+    ip protocol == icmp limit rate 20/second accept
+    ip6 nexthdr == ipv6-icmp limit rate 20/second accept
+    ip protocol == icmp drop
+    ip6 nexthdr == ipv6-icmp drop
+    ip protocol == { tcp, udp } th.dport == { 22, 53, 80, 443, 853 } accept
+    ip6 nexthdr == { tcp, udp } th.dport == { 22, 53, 80, 443, 853 } accept
+  }
+}
+
+table inet global {
+  chain inbound_wan {
+    ip protocol == icmp icmp type != { destination-unreachable, echo-request, time-exceeded, parameter-problem } drop
+    ip6 nexthdr == ipv6-icmp icmpv6 type != { destination-unreachable, echo-request, time-exceeded, parameter-problem, packet-too-big, nd-neighbor-solicit } drop
+    ip protocol == icmp accept
+    ip6 nexthdr == ipv6-icmp accept
+    th dport == 22 accept
+  }
+
+  chain inbound_lan {
+    accept
+  }
+
+  chain inbound {
+    type filter hook input priority filter; policy drop;
+
+    ct state vmap { established : accept, related : accept, invalid : drop }
+
+    tcp flags & syn == 0 ct state new drop
+
+    iifname vmap {
+      lo : accept,
+      wan0 : jump inbound_wan,
+      lan0 : jump inbound_lan
+    }
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+
+    ct state vmap { established : accept, related : accept, invalid : drop }
+    iifname == "wan0" oifname == "lan0" accept
+    iifname == "lan0" accept
+    iifname == "wan0" oifname == "wan0" accept
+  }
+
+  chain postrouting {
+    type nat hook postrouting priority filter; policy accept;
+    meta protocol == { ip, ip6 } iifname == "lan0" oifname == "wan0" masquerade;
+  }
+
+  set block4 {
+    type ipv4_addr;
+    flags interval;
+    elements = {
+      194.190.137.0/24,
+      194.190.157.0/24,
+      194.190.21.0/24,
+      194.226.130.0/23
+    };
+  }
+
+  set block6 {
+    type ipv6_addr;
+    flags interval;
+  }
+
+  set force_unvpn4 {
+    type ipv4_addr;
+    flags interval;
+  }
+
+  set force_unvpn6 {
+    type ipv6_addr;
+    flags interval;
+  }
+
+  chain prerouting {
+    type filter hook prerouting priority filter; policy accept;
+    meta mark set ct mark
+    meta mark != 0x0 accept
+    iifname == "lan0" meta mark set 0x2
+    ip daddr @force_unvpn4 meta mark set 0x1
+    ip6 daddr @force_unvpn6 meta mark set 0x1
+    ip daddr @block4 drop
+    ip daddr @block6 drop
+    ct mark set meta mark
+  }
+}
+```
