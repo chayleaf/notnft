@@ -87,7 +87,7 @@ let
           ">>" = binOpCheck;
           "<<" = binOpCheck;
           concat = builtins.all isValidCat;
-          prefix = isValidPrim;
+          prefix = { addr, ... }: isValidPrim addr;
           range = builtins.all isValidPrim;
           set = expr:
             if builtins.isList expr then builtins.all (elem:
@@ -471,7 +471,7 @@ let
           description = "The chain’s hook.";
         };
         prio = {
-          type = types.prio;
+          type = types.chainPriority;
           description = "The chain’s priority.";
         };
         dev = {
@@ -551,8 +551,8 @@ let
       name = if isMap == true then "map" else "set";
     in submodule' {
       finalMerge = ret:
-        if ret?expr then
-          let expr = ret.expr; in assert lib.assertMsg
+        if ret?elem then
+          let expr = ret.elem; in assert lib.assertMsg
             (if builtins.isList expr then builtins.all (elem:
               if builtins.isList elem && builtins.length elem == 2
               then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
@@ -692,7 +692,7 @@ let
           description = "The flowtable’s hook.";
         };
         prio = {
-          type = lib.types.int;
+          type = types.flowtablePriority;
           description = "The flowtable’s priority.";
         };
         dev = {
@@ -1175,15 +1175,28 @@ let
       description = "nftables hook";
       enum = hooks;
     };
-    prio = lib.mkOptionType {
-      name = "nftablesPrio";
+    flowtablePriority = lib.mkOptionType {
+      name = "nftablesFlowtablePrio";
+      description = "nftables flowtable priority";
+      descriptionClass = "noun";
+      check =
+        x:
+        builtins.isInt x
+        || (if strictEnums then builtins.elem x (builtins.attrValues flowtablePriorities)
+            else builtins.elem x (builtins.attrNames flowtablePriorities) || builtins.elem x (builtins.attrValues flowtablePriorities));
+      merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
+        value = if builtins.isInt def.value then def.value else flowtablePriorities.${toString def.value};
+      }) defs);
+    };
+    chainPriority = lib.mkOptionType {
+      name = "nftablesChainPrio";
       description = "nftables chain priority";
       descriptionClass = "noun";
       check =
         x:
         builtins.isInt x
-        || (if strictEnums then builtins.elem x (builtins.attrValues priorities)
-            else builtins.elem x (builtins.attrNames priorities) || builtins.elem x (builtins.attrValues priorities));
+        || (if strictEnums then builtins.elem x (builtins.attrValues chainPriorities)
+            else builtins.elem x (builtins.attrNames chainPriorities) || builtins.elem x (builtins.attrValues chainPriorities));
       merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
         value = if builtins.isInt def.value then def.value else toString def.value;
       }) defs);
@@ -1196,7 +1209,7 @@ let
     l3Proto = mkEnum {
       name = "nftablesL3Proto";
       description = "nftables layer 3 protocol";
-      enum = lib.filterAttrs (k: v: v.isL3 or false) families;
+      enum = l3Families;
     };
     timeUnit = mkEnum {
       name = "nftablesTimeUnit";
@@ -1206,7 +1219,7 @@ let
     byteUnit = mkEnum {
       name = "nftablesByteUnit";
       description = "nftables byte unit";
-      enum = lib.filterAttrs (k: v: !v.onlyRate) rateUnits;
+      enum = byteUnits;
     };
     rateUnit = mkEnum {
       name = "nftablesRateUnit";
@@ -1396,7 +1409,7 @@ let
           else
             x // (if builtins.isString (x.prio or null) then
               let
-                prioInfo = priorities.${x.prio};
+                prioInfo = chainPriorities.${x.prio};
               in
                 (if x?family && prioInfo.families or null != null && !(builtins.elem x.family prioInfo.families) then
                   throw "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
@@ -1708,7 +1721,7 @@ let
     insertCommand = lib.types.submodule {
       options = {
         rule = lib.mkOption {
-          type = types.ruleToReplace;
+          type = types.ruleToAdd;
           description = "rule to insert (prepend)";
         };
       };
@@ -3055,6 +3068,7 @@ let
     limit.isKey = false;
     secmark.isKey = false;
   };
+  setKeyTypes = lib.filterAttrs (k: v: v.isKey or true) nftTypes;
   xtTypes = mkEnum "xtTypes" {
     match = {};
     target = {};
@@ -3203,6 +3217,7 @@ let
     };
   };
   ipFamilies = lib.filterAttrs (k: v: v.isIp or false) families;
+  l3Families = lib.filterAttrs (k: v: v.isL3 or false) families;
   chainPolicies = mkEnum "chainPolicies" {
     accept = {};
     drop = {};
@@ -3714,7 +3729,10 @@ let
     reqid.needsFamily = false;
     spi.needsFamily = false;
   };
-  priorities = mkEnum "priorities" {
+  flowtablePriorities = mkEnum "flowtablePriorities" {
+    filter = 0;
+  };
+  chainPriorities = mkEnum "chainPriorities" {
     raw = {
       value = family: -300;
       families = [ "ip" "ip6" "inet" ];
@@ -4132,16 +4150,16 @@ let
 in rec {
   config.notnft = {
     inherit
-      arpOps booleans byteUnits chainPolicies chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
+      arpOps booleans byteUnits chainPolicies chainPriorities chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
       days dccpPktTypes dscpTypes ecnTypes etherTypes exists exthdrFields exthdrs
-      families fibAddrTypes fibFlags fibResults hooks
+      families fibAddrTypes fibFlags fibResults flowtablePriorities hooks
       icmpCodes icmpTypes icmpv6Codes icmpv6Types icmpxCodes ifaceTypes igmpTypes
       inetProtos ipFamilies ipOptionFields ipOptions ipsecDirs ipsecKeys isValidExpr
       logFlags logLevels metaKeys mhTypes missing
       natFlags natTypeFlags nfProtos nftTypes ngModes operators osfKeys osfTtls
-      payloadBases payloadFields payloadProtocols pktTypes priorities
+      payloadBases payloadFields payloadProtocols pktTypes 
       queueFlags rateUnits rejectTypes rtKeys
-      sctpChunkFields sctpChunks setFlags setOps setPolicies setReference socketKeys synproxyFlags
+      sctpChunkFields sctpChunks setFlags setKeyTypes setOps setPolicies setReference socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
       udpConnectionStates wildcard xtTypes;
     inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums;

@@ -1,296 +1,216 @@
 { lib, notnft }:
 
 let
-  toList = x: lib.toList
-    (if builtins.isAttrs x && x?__list__ then x.__list__
-    else if builtins.isAttrs x then builtins.removeAttrs x [ "__functor" ]
-    else x);
-  # yes, recursion, too lazy to throw
-  # essentially recursion means not enough info is being passed somehow
-  passInfo = x: info:
-    let info' = info // { __args__ = true; }; in
-    if builtins.isFunction x then passInfo (x info') info' else toList x;
-  special = x: { __special__ = true; } // x;
-  isSpecial = x: x.__special__ or x?__functor;
-  isArgs = x: x.__args__ or (builtins.isAttrs x && (x?name || x?comment || x?type || x?hook || x?dev || x?prio || x?policy));
-  args = x: builtins.removeAttrs x [ "__args__" ];
-  passNamesAnd = attrs: obj:
-    if builtins.isAttrs obj && !(isSpecial obj)
-    then builtins.concatLists (lib.mapAttrsToList (k: v: passInfo v (attrs // { name = k; })) obj)
-    else passInfo obj attrs;
-  passNames = passNamesAnd {};
-  takeArgs' = added: self: attrs: x:
-    (if isArgs x then builtins.foldl' lib.id (self ((args x) // attrs)) added
-    else takeArgs' (added ++ [x]) self attrs);
-  takeArgs = takeArgs' [];
+  isSpecial = x: builtins.isAttrs x && builtins.any (lib.hasPrefix "__") (builtins.attrNames x);
   fixupStmts = stmts:
     if builtins.isList stmts then map fixupStmts stmts
     else if !(builtins.isAttrs stmts) then stmts
     else if stmts?__expr__ then fixupStmts stmts.__expr__
     else if builtins.any (lib.hasPrefix "_") (builtins.attrNames stmts) then stmts
     else builtins.mapAttrs (k: fixupStmts) stmts;
+  fillEnum = enum: x: if builtins.isFunction x then x enum else x;
+  fillEnums = enums: builtins.mapAttrs (k: v: if builtins.isFunction v then v enums.${k} else v);
+  mkObj = name: enums: attrs:
+    fillEnums (fillEnum attrs (fillEnum attrs enums)) attrs;
+  # takeAttrs = names: lib.filterAttrs (k: v: builtins.elem k names);
+  finalize = attrs: x:
+    if x?__finalize then x.__finalize x attrs
+    else fillEnum attrs x;
+  mkCmd = cmd': obj0:
+    if obj0 == self.existing then obj0: mkCmd cmd' (obj0 // { __existing__ = true; _ = null; }) else (let
+      family = { family = notnft.families; };
+      family2 = { type, ... }:
+      let
+        t = notnft.chainTypes.${toString (fillEnum notnft.chainTypes type)};
+        families = if t?families then lib.filterAttrs (k: v: builtins.elem k t.families) notnft.families else notnft.families;
+      in { family = families; };
+      ctype = { type = notnft.chainTypes; };
+      hook = { hook = notnft.hooks; };
+      hook2 = { type, ... }:
+      let
+        t = notnft.chainTypes.${toString (fillEnum notnft.chainTypes type)};
+        hooks = if t?hooks then lib.filterAttrs (k: v: builtins.elem k t.hooks) notnft.hooks else notnft.hooks;
+      in { hook = hooks; };
+      cpolicy = { policy = notnft.chainPolicies; };
+      cprio = { family ? null, hook ? null, ... }:
+        let
+          family' = toString (fillEnum notnft.families family);
+          hook' = toString (fillEnum notnft.hooks hook);
+        in {
+          prio = builtins.mapAttrs
+            (k: v: v.value family')
+            (lib.filterAttrs
+              (k: v:
+                (!v?families || builtins.elem family' v.families)
+                && (!v?hooks || builtins.elem hook' v.hooks))
+              notnft.chainPriorities);
+        };
+      fprio = { prio = notnft.flowtablePriorities; };
+      spolicy = { policy = notnft.setPolicies; };
+      stype = { type = notnft.setKeyTypes; };
+      map' = { map = notnft.nftTypes; };
+      sflags = { flags = notnft.setFlags; };
+      protocol = { protocol = notnft.ctProtocols; };
+      l3proto = { l3proto = notnft.l3Families; };
+      per = { per = notnft.timeUnits; };
+      rate_unit = { rate_unit = notnft.rateUnits; };
+      burst_unit = { burst_unit = notnft.rateUnits; };
+      spflags = { flags = notnft.synproxyFlags; };
+      obj = obj0.__object__ or obj0;
+      existing = obj0.__existing__ or false;
+      initial = obj0.__initial__ or { };
+      cmd = if cmd' == "insert" && obj != "rule" then "add" else cmd';
+      obj' =
+        if obj == "table" then mkObj "table" family
+        else if obj == "chain" then mkObj "chain" (attrs: family2 attrs // ctype // hook2 attrs // cpolicy // cprio attrs)
+        else if obj == "rule" then mkObj "rule" family
+        else if obj == "set" then mkObj "set" (family // spolicy // stype // sflags)
+        else if obj == "map" then mkObj "map" (family // spolicy // stype // sflags // map')
+        else if obj == "flowtable" then mkObj "flowtable" family // hook // fprio
+        else if obj == "counter" then mkObj "counter" family
+        else if obj == "quota" then mkObj "quota" family
+        else if obj == "ct helper" then mkObj "ct helper" (family // protocol // l3proto)
+        else if obj == "limit" then mkObj "limit" (family // per // rate_unit // burst_unit)
+        else if obj == "ct timeout" then mkObj "ct timeout" (family // protocol // l3proto)
+        else if obj == "ct expectation" then mkObj "ct expectation" (family // l3proto // protocol)
+        else if obj == "synproxy" then mkObj "synproxy" (family // spflags)
+        else mkObj obj { };
+      extend =
+        if cmd' == "insert" then a: b: lib.toList b ++ a
+        else a: b: a ++ lib.toList b;
+    in
+      if obj == "table" then let fn = initial: {
+        __list__ = [ ];
+        __attrs__ = { };
+        __functor = self: x:
+          if isSpecial x then self // { __list__ = self.__list__ ++ lib.toList x; }
+          else if builtins.isList x then self // { __list__ = builtins.concatLists ([ self.__list__ ] ++ map lib.toList x); }
+          else self // { __attrs__ = self.__attrs__ // x; };
+        __finalize = self: attrs:
+          let
+            obj'' = initial // fillEnum (initial // attrs) obj';
+          in
+            builtins.concatLists (lib.optional (!existing) [ { ${cmd}.table = obj''; } ]
+            ++ (map (x: lib.toList (finalize {
+              inherit (obj'') family;
+              table = obj''.name;
+            } x)) self.__list__)
+            ++ (lib.mapAttrsToList (k: v: lib.toList (finalize {
+              inherit (obj'') family;
+              table = obj''.name;
+              name = k;
+            } v)) self.__attrs__));
+      }; in fn initial // {
+        __functor = self: arg: if !(isSpecial arg) && (arg?comment || arg?family || arg?name || arg?handle) then fn (initial // arg) else fn initial arg;
+      } else if obj == "chain" then let fn = initial: {
+        __list__ = [ ];
+        __functor = self: x:
+          if isSpecial x then self // { __list__ = extend self.__list__ x; }
+          else if x == [] || builtins.isList (builtins.head x) then self // {
+            __list__ = builtins.foldl' (a: b: extend a [ b ]) self.__list__ x;
+          } else self // {
+            __list__ = extend self.__list__ [ x ];
+          };
+        __finalize = self': attrs:
+          let
+            obj'' = initial // fillEnum (initial // attrs) obj';
+          in
+            builtins.concatLists (lib.optional (!existing) [ { ${cmd}.chain = obj''; } ]
+            ++ map (x:
+              lib.toList (if builtins.isList x then (finalize { } (mkCmd cmd' self.rule {
+                inherit (obj'') family table;
+                chain = obj''.name;
+                expr = fixupStmts x;
+              })) else let tmp = finalize ({
+                inherit (obj'') family table;
+                chain = obj''.name;
+              }) x; in tmp // { expr = fixupStmts tmp.expr; })) self'.__list__);
+      }; in fn initial // {
+        __functor = self: arg: if !(isSpecial arg) && builtins.any (field: arg?${field}) [ "family" "table" "name" "type" "hook" "prio" "dev" "policy" "comment" "handle" "newname" ] then fn (initial // arg) else fn initial arg;
+      } else if obj == "set" || obj == "map" then let fn = initial: {
+        __list__ = [ ];
+        __functor = self: x: self // {
+          __list__ = self.__list__ ++ x;
+        };
+        __finalize = self: args:
+          let
+            obj'' = initial // fillEnum (initial // args) obj';
+          in
+            if existing then {
+              ${cmd}.element = {
+                inherit (obj'') family table name;
+                elem = map fixupStmts self.__list__;
+              };
+            } else {
+              ${cmd}.${obj} = obj'' // {
+                elem = map fixupStmts self.__list__;
+              };
+            };
+      }; in fn initial // {
+        __functor = self: arg:
+          if !(isSpecial arg) && builtins.isAttrs arg && builtins.any (field: arg?${field}) [ "table" "name" "type" "map" "policy" "flags" "elem" "timeout" "gc-interval" "size" "stmt" "handle" ] then fn (initial // arg) else fn initial arg;
+      } else {
+        __functor = self: args: let initial' = initial // args; in {
+          __finalize = self: args: {
+            ${cmd}.${obj} = initial' // fillEnum (initial' // args) obj';
+          };
+        };
+        __finalize = self: args: {
+          ${cmd}.${obj} = initial // fillEnum (initial // args) obj';
+        };
+      });
+    
 self = rec {
-  # this DSL works by returning attrsets if all info is known, and functions if they expect more attrs
-  # compile just extracts the list from the dsl
-  compile = x: toList x;
-  Ruleset = x: { nftables = passNames x; };
-  Table = { family ? null, name ? null, existing ? false } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?name || !attrs?family then takeArgs Table attrs
-    else special {
-      __list__ = if existing then [] else [ { add.table = builtins.removeAttrs attrs [ "existing" ]; } ];
-      __functor = self: obj:
-        self // {
-          __list__ = self.__list__ ++ (passNamesAnd { table = name; inherit family; } obj);
-        };
+  create = mkCmd "create";
+  add = mkCmd "add";
+  insert = mkCmd "insert";
+  delete = mkCmd "delete";
+  destroy = mkCmd "destroy";
+  flush = mkCmd "flush";
+  rename = mkCmd "rename";
+  compile = x: finalize { } x;
+  table = {
+    __object__ = "table";
+    __functor = add;
+  } // builtins.mapAttrs (k: v: {
+    __object__ = "table";
+    __initial__ = { family = v; };
+  }) notnft.families;
+  tables = { __object__ = "tables"; };
+  existing = { __existing__ = true; };
+  rule = { __object__ = "rule"; };
+  rules = { __object__ = "rules"; };
+  chain = { __object__ = "chain"; };
+  chains = { __object__ = "chains"; };
+  set = { __object__ = "set"; };
+  sets = { __object__ = "sets"; };
+  maps = { __object__ = "maps"; };
+  flowtable = { __object__ = "flowtable"; };
+  flowtables = { __object__ = "flowtables"; };
+  synproxys = { __object__ = "synproxys"; };
+  counter = { __object__ = "counter"; };
+  quotas = { __object__ = "quotas"; };
+  secmarks = { __object__ = "secmarks"; };
+  ctHelpers = { __object__ = "ct helpers"; };
+  ctTimeouts = { __object__ = "ct timeouts"; };
+  ctExpectations = { __object__ = "ct expectations"; };
+  meters = { __object__ = "meters"; };
+  counters = { __object__ = "counters"; };
+  ruleset = {
+    __object__ = "ruleset";
+    __functor = self: attrs: {
+      nftables =
+        if builtins.isAttrs attrs
+        then builtins.concatLists (lib.mapAttrsToList
+          (name: val: lib.toList (finalize { inherit name; } val))
+          attrs)
+        else assert builtins.isList attrs; builtins.concatLists (map lib.toList attrs);
     };
-  ExistingTable = Table { existing = true; };
-  Chain' = {
-    family ? null
-    , table ? null
-    , name ? null
-    , type ? null
-    , hook ? null
-    , prio ? null
-    , dev ? null
-    , policy ? null
-    , existing ? false
-    # insert (prepend) rules instead of adding (append)
-    , prepend ? false
-  } @ attrs': 
-    let attrs = attrs' // (if builtins.isFunction family then {
-      family = family notnft.families;
-    } else {}) // (if builtins.isFunction type then {
-      type = type notnft.chainTypes;
-    } else {}) // (if builtins.isFunction hook then {
-      hook = hook notnft.hooks;
-    } else {}) // (if builtins.isFunction policy then {
-      policy = policy notnft.chainPolicies;
-    } else {}) // (if builtins.isFunction prio && attrs'?family then {
-      prio = prio (builtins.mapAttrs (k: v: v.value (toString family))
-        (lib.filterAttrs (k: v: (!v?families || builtins.elem (toString family) v.families) && (!v?hooks || builtins.elem (toString hook) v.hooks)) notnft.priorities));
-    } else {}); in
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs Chain' attrs
-    else {
-      __list__ = if existing then [ ] else [ { add.chain = builtins.removeAttrs attrs [ "prepend" "existing" ]; } ];
-      __functor = self: obj:
-        if builtins.isList obj && obj != [] && builtins.isList (builtins.head obj) then builtins.foldl' lib.id self obj
-        else self // {
-          __list__ =
-            let
-              obj' =
-                if builtins.isList obj
-                then builtins.foldl' lib.id (Rule' { chain = name; inherit family table prepend; }) obj
-                else obj;
-              obj'' = toList (passInfo obj' { chain = name; inherit family table; });
-            in
-              if prepend && existing then obj'' ++ self.__list__
-              else if prepend then [ (builtins.head self.__list__) ] ++ obj'' ++ builtins.tail self.__list__
-              else self.__list__ ++ obj'';
-        };
-    };
-  Chain = Chain' { };
-  ExistingChain = Chain' { existing = true; };
-  InsertExistingChain = Chain' { existing = true; insert = true; };
-  Rule' = {
-    family ? null
-    , table ? null
-    , chain ? null
-    , comment ? null
-    , prepend ? false
-  } @ attrs': 
-    let
-      attrs = if builtins.isFunction family then attrs' // {
-        family = family notnft.families;
-      } else attrs';
-      cmd = if prepend then "insert" else "add";
-    in
-    if !attrs?chain || !attrs?family || !attrs?table then takeArgs Rule' attrs
-    else {
-      ${cmd}.rule = builtins.removeAttrs attrs [ "prepend" ];
-      __functor = self: obj:
-        self // {
-          ${cmd}.rule = self.${cmd}.rule // {
-            expr = (self.${cmd}.rule.expr or []) ++ (toList (fixupStmts obj));
-          };
-        };
-      };
-  Rule = Rule' {};
-  InsertRule = Rule' { insert = true; };
-  Set = {
-    family ? null
-    , table ? null
-    , name ? null
-    , handle ? null
-    , type ? null
-    , policy ? null
-    , flags ? null
-    , timeout ? null
-    , gc-interval ? null
-    , size ? null
-  } @ attrs':
-    let
-      attrs = attrs' // (if builtins.isFunction family then {
-        family = family notnft.families;
-      } else {}) // (if builtins.isFunction policy then {
-        policy = policy notnft.setPolicies;
-      } else {}) // (if builtins.isFunction type then {
-        type = type notnft.nftTypes;
-      } else {}) // (if builtins.isFunction flags then {
-        flags = flags notnft.setFlags;
-      } else {});
-      types' = builtins.toList type;
-      typeStrs = map toString types';
-      enums = builtins.filter (x: x != null) (map (x: notnft.nftType.${x}.enum or null) typeStrs);
-      enum = notnft.mergeEnums enums;
-    in
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs Set attrs
-    else {
-      add.set = attrs;
-      __functor = self: obj':
-        let obj = if builtins.isFunction obj' then obj' enum else obj'; in self // {
-          add.set = self.add.set // {
-            elem = (self.add.set.elem or []) ++ (toList obj);
-          };
-        };
-    };
-  Map = {
-    family ? null
-    , table ? null
-    , name ? null
-    , handle ? null
-    , type ? null
-    , map ? null
-    , policy ? null
-    , flags ? null
-    , timeout ? null
-    , gc-interval ? null
-    , size ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?name || !attrs?family || !attrs?table then takeArgs map attrs
-    else {
-      add.map = attrs;
-      __functor = self: obj:
-        if builtins.isList obj && (
-              builtins.length obj != 2
-              || !(builtins.isList (builtins.head obj))
-              || (builtins.length (builtins.head obj)) != 2) then builtins.foldl' lib.id self obj
-        else self // {
-          add.set = self.add.set // {
-            elem = (self.add.set.elem or []) ++ (toList obj);
-          };
-        };
-      };
-  Flowtable = {
-    family ? null
-    , table ? null
-    , name ? null
-    , hook ? null
-    , prio ? null
-    , dev ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs Flowtable attrs
-    else special { add.flowtable = attrs; };
-  Counter = {
-    family ? null
-    , table ? null
-    , name ? null
-    , packets ? null
-    , bytes ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs Counter attrs
-    else special { add.counter = attrs; };
-  Quota = {
-    family ? null
-    , table ? null
-    , name ? null
-    , bytes ? null
-    , used ? null
-    , inv ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs Quota attrs
-    else special { add.quota = attrs; };
-  "Ct helper" = {
-    family ? null
-    , table ? null
-    , name ? null
-    , type ? null
-    , protocol ? null
-    , l3proto ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct helper" attrs
-    else special { add."ct helper" = attrs; };
-  CtHelper = self."Ct helper";
-  Limit = {
-    family ? null
-    , table ? null
-    , name ? null
-    , rate ? null
-    , per ? null
-    , burst ? null
-    , unit ? null
-    , inv ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs Limit attrs
-    else special { add.limit = attrs; };
-  "Ct timeout" = {
-    family ? null
-    , table ? null
-    , name ? null
-    , protocol ? null
-    , state ? null
-    , value ? null
-    , l3proto ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct timeout" attrs
-    else special { add."ct timeout" = attrs; };
-  CtTimeout = self."Ct timeout";
-  "Ct expectation" = {
-    family ? null
-    , table ? null
-    , name ? null
-    , l3proto ? null
-    , protocol ? null
-    , dport ? null
-    , timeout ? null
-    , size ? null
-  } @ attrs':
-    let attrs = if builtins.isFunction family then attrs' // {
-      family = family notnft.families;
-    } else attrs'; in
-    if !attrs?family || !attrs?table || !attrs?name then takeArgs self."Ct expectation" attrs
-    else special { add."ct expectation" = attrs; };
-  CtExpectation = self."Ct expectation";
+  };
   match = builtins.mapAttrs (_: op: left: right: {
     match = {
       inherit op left;
-      right =
-        if builtins.isFunction right
-        then right (notnft.exprEnumsMerged left)
-        else right;
+      right = fillEnum (notnft.exprEnumsMerged left) right;
     };
   }) notnft.operators;
   is = match;
@@ -376,7 +296,7 @@ self = rec {
     notnft.exthdrs;
   bit = let
     self = (lib.genAttrs [ "|" "^" "&" "<<" ">>" ] (op: let fn = (a: b: {
-      __expr__.${op} = [ a (if builtins.isFunction b then b (notnft.exprEnumsMerged a) else b) ];
+      __expr__.${op} = [ a (fillEnum (notnft.exprEnumsMerged a) b) ];
       __functor = self: fn self.__expr__;
     }); in fn));
   in self // rec {
@@ -423,84 +343,94 @@ self = rec {
   jump = target: { jump.target = target; };
   goto = target: { goto.target = target; };
   range = a: b: { range = [ a b ]; };
-  fib =
-    flags':
-      let
-        flags = if builtins.isFunction flags' then flags' notnft.fibFlags else flags';
-      in result':
-        let result = if builtins.isFunction result' then result' notnft.fibResults else result'; in
-        { fib = { inherit flags result; }; };
+  fib = flags': result':
+    let
+      flags = fillEnum notnft.fibFlags flags';
+      result = fillEnum notnft.fibResults result';
+    in
+      { fib = { inherit flags result; }; };
   # anonymous set
   set = {
+    # set statement
     add = set: elem: { set = { op = notnft.setOps.add; inherit set elem; }; };
     update = set: elem: { set = { op = notnft.setOps.update; inherit set elem; }; };
     delete = set: elem: { set = { op = notnft.setOps.delete; inherit set elem; }; };
+    # set expr
     __functor = self: x: { set = x; };
   };
-  map = key: data: {
-    map = {
-      inherit key;
-      data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
+  map = {
+    __object__ = "map";
+    __functor = self: key: data: {
+      map = {
+        inherit key;
+        data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
+      };
     };
   };
-  limit = attrs @ { per ? null, ... }: {
-    limit = attrs
-      // (if builtins.isFunction per then { per = per notnft.timeUnits; } else {});
+  limit = {
+    __object__ = "limit";
+    __functor = self: attrs: { limit = fillEnums { per = notnft.timeUnits; } attrs; };
   };
-  fwd = { family ? null, ... } @ attrs: {
-    fwd = attrs
-      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { });
-  };
+  fwd = attrs: { fwd = fillEnums { family = notnft.ipFamilies; } attrs; };
   notrack = {
     notrack = null;
   };
   dup = attrs: { dup = attrs; };
   cidr = addr: len: { prefix = { inherit addr len; }; };
-  snat = x: if builtins.isAttrs x then ({ family ? null, flags ? null, type_flags ? null, ... } @ attrs: {
-    snat = attrs
-      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { })
-      // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
-      // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
-  }) x else {
-    __expr__.snat.addr = x;
-    __functor = self: attrs: snat ({ addr = x; } // attrs);
-  };
-  dnat = x: if builtins.isAttrs x then ({ family ? null, flags ? null, type_flags ? null, ... } @ attrs: {
-    dnat = attrs
-      // (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { })
-      // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
-      // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
-  }) x else {
-    __expr__.dnat.addr = x;
-    __functor = self: attrs: dnat ({ addr = x; } // attrs);
-  };
-  masquerade = {
-    __expr__.masquerade = { };
-    __functor = self: x: if builtins.isInt x then {
-      __expr__.masquerade.port = x;
-      __functor = self: attrs: masquerade ({ port = x; } // attrs);
-    } else ({ flags ? null, type_flags ? null, ... } @ attrs: {
-      masquerade = attrs
-        // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
-        // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
-    }) x;
-  };
-  redirect = {
-    __expr__.redirect = { };
-    __functor = self: x: if builtins.isInt x then {
-      __expr__.redirect.port = x;
-      __functor = self: attrs: redirect ({ port = x; } // attrs);
-    } else ({ flags ? null, type_flags ? null, ... } @ attrs: {
-      redirect = attrs
-        // (if builtins.isFunction flags then { flags = flags notnft.natFlags; } else { })
-        // (if builtins.isFunction type_flags then { type_flags = type_flags notnft.natTypeFlags; } else { });
-    }) x;
-  };
+  snat = x:
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; family = notnft.ipFamilies; };
+    in if builtins.isAttrs x then {
+      snat = fill x;
+    } else {
+      __expr__.snat.addr = x;
+      __functor = self: attrs:
+        if builtins.isInt attrs then {
+          __expr__.snat = self.__expr__.snat // { port = attrs; };
+          __functor = self: attrs: { snat = self.__expr__.snat // fill attrs; };
+        } else { snat = self.__expr__.snat // fill attrs; };
+    };
+  dnat = x:
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; family = notnft.ipFamilies; };
+    in if builtins.isAttrs x then {
+      dnat = fill x;
+    } else {
+      __expr__.dnat.addr = x;
+      __functor = self: attrs:
+        if builtins.isInt attrs then {
+          __expr__.dnat = self.__expr__.dnat // { port = attrs; };
+          __functor = self: attrs: { dnat = self.__expr__.dnat // fill attrs; };
+        } else { dnat = self.__expr__.dnat // fill attrs; };
+    };
+  masquerade =
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; };
+    in {
+      __expr__.masquerade = { };
+      __functor = self: x: if builtins.isInt x then {
+        __expr__.masquerade.port = x;
+        __functor = self: attrs: { masquerade = self.__expr__.masquerade // fill attrs; };
+      } else {
+        masquerade = fill x;
+      };
+    };
+  redirect =
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; };
+    in {
+      __expr__.redirect = { };
+      __functor = self: x: if builtins.isInt x then {
+        __expr__.redirect.port = x;
+        __functor = self: attrs: { redirect = self.__expr__.redirect // fill attrs; };
+      } else {
+        redirect = fill x;
+      };
+    };
   reject = {
     __expr__.reject = { };
-    __functor = self: { type ? null, ... }:  {
-      reject = self.__expr__.reject
-        // (if builtins.isFunction type then { type = type notnft.rejectTypes; } else { });
+    __functor = self: attrs:  {
+      reject = self.__expr__.reject // fillEnums { type = notnft.rejectTypes; } attrs;
     };
   };
   vmap = key: data: {
@@ -521,7 +451,7 @@ self = rec {
     };
   mangle = key: value: { mangle = {
     inherit key;
-    value = if builtins.isFunction value then value (notnft.exprEnumsMerged key) else value;
+    value = fillEnum (notnft.exprEnumsMerged key) value;
   }; };
   concat = exprs: {
     __expr__.concat = lib.toList exprs;
@@ -533,22 +463,30 @@ self = rec {
     __expr__.counter = { };
     __functor = self: attrs: { counter = attrs; };
   };
-  quota = { val_unit ? null, used_unit ? null, ... } @ attrs: {
-    quota = attrs
-      // (if builtins.isFunction val_unit then { val_unit = val_unit notnft.byteUnits; } else { })
-      // (if builtins.isFunction used_unit then { used_unit = used_unit notnft.byteUnits; } else { });
+  quota = {
+    __object__ = "quota";
+    __functor = self: attrs: {
+      quota = fillEnums { val_unit = notnft.byteUnits; used_unit = notnft.byteUnits; } attrs;
+    };
   };
-  log = { level ? null, flags ? null, ... }@ attrs: {
-    log = attrs
-      // (if builtins.isFunction level then { level = level notnft.logLevels; } else { })
-      // (if builtins.isFunction flags then { flags = flags notnft.logFlags; } else { });
+  log = attrs: {
+    log = fillEnums { level = notnft.logLevels; flags = notnft.logFlags; } attrs;
   };
   # ct helper set
-  ctHelper = expr: { "ct helper" = expr; };
+  ctHelper = {
+    __object__ = "ct helper";
+    __functor = self: expr: { "ct helper" = expr; };
+  };
   meter = attrs: { meter = attrs; };
   ctCount = attrs: { "ct count" = if builtins.isInt attrs then { val = attrs; } else attrs; };
-  ctTimeout = attrs: { "ct timeout" = attrs; };
-  ctExpectation = attrs: { "ct expectation" = attrs; };
+  ctTimeout = {
+    __object__ = "ct timeout";
+    __functor = self: attrs: { "ct timeout" = attrs; };
+  };
+  ctExpectation = {
+    __object__ = "ct expectation";
+    __functor = self: attrs: { "ct expectation" = attrs; };
+  };
   xt = attrs: { xt = attrs; };
   flow.add = name: {
     flow = {
@@ -558,27 +496,31 @@ self = rec {
   };
   queue = {
     __expr__ = { queue = { }; };
-    __functor = self: { flags ? null, ... } @ attrs: {
-      queue = attrs
-        // (if builtins.isFunction flags then { flags = flags notnft.queueFlags; } else { });
+    __functor = self: attrs: {
+      queue = fillEnums { flags = notnft.queueFlags; } attrs;
     };
   };
-  tproxy = { family ? null, ... } @ attrs: {
-    tproxy = attrs //
-      (if builtins.isFunction family then { family = family notnft.ipFamilies; } else { });
+  tproxy = attrs: {
+    tproxy = fillEnums { family = notnft.ipFamilies; } attrs;
   };
-  synproxy = { flags ? null, ... } @ attrs: {
-    synproxy = attrs //
-      (if builtins.isFunction flags then { flags = flags notnft.synproxyFlags; } else { });
+  synproxy = {
+    __object__ = "synproxy";
+    __functor = self: attrs: {
+      synproxy = fillEnums { flags = notnft.synproxyFlags; } attrs;
+    };
   };
   # reset tcp option
-  reset = opt: {
-    reset = opt;
-  };
+  reset = opt:
+    if opt?__object__ then mkCmd "reset" opt else {
+      reset = opt;
+    };
   dccpOpt = type: {
     "dccp option" = { inherit type; };
   };
   # set secmark or whatever?
-  secmark = secmark: { inherit secmark; };
+  secmark = {
+    __object__ = "secmark";
+    __functor = self: secmark: { inherit secmark; };
+  };
   inherit (notnft) exists missing;
 }; in self
