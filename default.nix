@@ -4143,8 +4143,6 @@ let
   connectionStates = builtins.mapAttrs (k: v: k) connectionStates';
   tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp") connectionStates');
   udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp") connectionStates');
-  wildcard = "*";
-  setReference = s: "@${s}";
 in rec {
   config.notnft = {
     inherit
@@ -4157,9 +4155,9 @@ in rec {
       natFlags natTypeFlags nfProtos nftTypes ngModes operators osfKeys osfTtls
       payloadBases payloadFields payloadProtocols pktTypes 
       queueFlags rateUnits rejectTypes rtKeys
-      sctpChunkFields sctpChunks setFlags setKeyTypes setOps setPolicies setReference socketKeys synproxyFlags
+      sctpChunkFields sctpChunks setFlags setKeyTypes setOps setPolicies socketKeys synproxyFlags
       tcpConnectionStates tcpFlags tcpOptionFields tcpOptions timeUnits types
-      udpConnectionStates wildcard xtTypes;
+      udpConnectionStates xtTypes;
     inherit exprEnums exprEnumsMerged exprEnumsRec innerExprs innerExprsRec mergeEnums mkEnum;
     dccpPkttypes = dccpPktTypes;
     # "days" isn't very descriptive, so here's an alias

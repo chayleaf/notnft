@@ -543,7 +543,7 @@ self = rec {
   flow.add = name: {
     flow = {
       op = notnft.flowtableOps.add;
-      inherit name;
+      name = if lib.hasPrefix "@" name then name else "@${name}";
     };
   };
   queue = {

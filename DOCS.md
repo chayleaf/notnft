@@ -161,8 +161,7 @@ The following statements are supported:
   - `ctCount { ... }` - see nftables-json docs for `ct count` statement.
 - `ctTimeout <expr>` - set a packet's ct timeout to `<expr>`
 - `ctExpectation <expr>` - set a packet's ct expectation to `<expr>`
-- `flow.add <name>` - select the flowtable for flow offloading (name
-  must be prefixed with `@`)
+- `flow.add <name>` - select the flowtable for flow offloading
 - `tproxy { ... }` - see libnftables-json docs
 - `synproxy { ... }` - see libnftables-json docs
 - `reset <expr>` - reset a tcp option expression
@@ -170,6 +169,9 @@ The following statements are supported:
 
 ## Expressions
 
+- `"@<set_name>"` - set reference/flowtable reference
+- `"*"` - wildcard (not sure what this is used for)
+- `[ a b c ]` - list expression (not sure what this is used for)
 - `concat <a> <b> <c>...` / `concat [ <a> <b> <c> ... ]` - concat
   multiple values (same as `a . b . c` in nftables)
 - `set [ a b c ... ]` - create an anonymous set (same as `{ a, b, c }`
