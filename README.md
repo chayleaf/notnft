@@ -176,7 +176,7 @@ table netdev filter {
     jump ingress_common
     fib daddr . iif type != { local, broadcast, multicast } drop
     ip protocol == icmp icmp type == { info-request, address-mask-request, router-advertisement, router-solicitation, redirect } drop
-    ip6 nexthdr == ipv6-icmp ipv6-icmp type == { mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-redirect, router-renumbering } drop
+    ip6 nexthdr == ipv6-icmp icmpv6 type == { mld-listener-query, mld-listener-report, mld-listener-reduction, nd-router-solicit, nd-router-advert, nd-redirect, router-renumbering } drop
     ip protocol == icmp limit rate 20/second accept
     ip6 nexthdr == ipv6-icmp limit rate 20/second accept
     ip protocol == icmp drop

@@ -411,7 +411,11 @@ self = rec {
     __functor = self: key: data: {
       map = {
         inherit key;
-        data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
+        data =
+          if builtins.isList data then
+            let merged = notnft.exprEnumsMerged key;
+            in map (kv: deepFillEnum' merged (builtins.head kv) ++ builtins.tail kv) (fillEnum merged data)
+          else lib.mapAttrsToList (k: v: [ k v ]) data;
       };
     };
   };

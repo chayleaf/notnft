@@ -53,7 +53,7 @@ used values. However, be aware that
      Enum will not work as well as it could).
    - I think it's fairly unlikely that those hacks will break anything,
      but use them at your own risk!
-2. You will not get the exact place where you used the wrong value
+2. You will not get the exact line where you used the wrong value
    in error messages if you do this.
 3. The enum may pollute the namespace, as there really are a lot of
    differently named constants in nftables.
@@ -79,7 +79,9 @@ or chains).
 
 - `table` - takes mandatory `family` and optional `comment` attrs
   - You can pass an attrset with the table's contents, each key will
-    become the associated object's name
+    become the associated object's name.
+    - Alternatively, you can pass the table contents directly or in a
+      list, but then you'll have to pass `name` to each object manually.
   - All other objects either have to be part of a table, or explicitly
     passed `family` (table family) and `table` (table name)
 - `chain` - takes optional `type`, `hook`, `prio`, `dev`, `policy`,
@@ -89,12 +91,13 @@ or chains).
     can repeatedly apply rules to the chain (`chain [a] [b] [c]`).
 - `set` - takes `type`, and optional `policy`, `flags`, `timeout`,
   `gc-interval`, `size` attrs.
-  - You can pass expressions to the set to initialize it with some
-    values.
+  - You can pass a list of expressions to the set to initialize it with
+    some values.
 - `map` - same as above, but also takes `map` attr (in this case `type`
   is key type, and `map` is value type).
   - If you want to initialize it with certain values, you have to pass
-    lists of size 2 (1st value is the key, 2nd is the associated value).
+    a list of lists of size 2 (1st value is the key, 2nd is the
+    associated value).
 - `flowtable`, `counter`, `quota`, `secmark`, `ctHelper`, `limit`,
   `ctTimeout`, `ctExpectation`, `synproxy` - refer to libnftables-json
   documentation for more info on those.
@@ -111,9 +114,9 @@ The following statements are supported:
 - `continue` - go to the next rule
 - `return` - return from the current rule and continue with the next
   rule in the previous chain
-- `jump CHAIN_NAME` - "call" another chain (so it can be returned from
+- `jump <CHAIN_NAME>` - "call" another chain (so it can be returned from
   to continue evaluating this chain)
-- `goto CHAIN_NAME` - "call" another chain, but don't push the current
+- `goto <CHAIN_NAME>` - "call" another chain, but don't push the current
   position to the call stack (so returning from that chain will return
   into the parent chain)
 - `is`, `is.eq`, `is.ne`, `is.gt`, `is.lt`, `is.ge`, `is.le` -
@@ -123,7 +126,7 @@ The following statements are supported:
   packets/bytes.
   - `counter { ... }` - pass some attrs (`packets`/`bytes`) to the
     counter. Refer to libnftables-json docs for more info.
-- `mangle A B` - change packet data/meta info A to B
+- `mangle <A> <B>` - change packet data/meta info A to B
 - `quota { ... }` - pass some attrs to quota statement (refer to
   libnftables-json docs)
 - `limit { ... }` - pass some attrs to limit statement (refer to
@@ -210,9 +213,9 @@ The following statements are supported:
   `elem { val = <expr>, ... }` - enrich `<expr>` with optional
   `timeout`, `expires` and `comment` when adding to a set. For maps,
   only the key can be an `elem`.
-- `socket.<key>` - search for an associated socket and get some
+- `socket.<key>`> - search for an associated socket and get some
   associated info. Keys are `transparent`, `mark`, `wildcard`.
-- `osf.<key>` / `osf.ttl.<ttl>.<key>` / `osf.<ttl>/<key>` - do operating
+- `osf.<key>` / `osf.ttl.<ttl>.<key>` / `osf.<ttl>.<key>` - do operating
   system fingerprinting. Key is `name` (OS signature name) or `version`
   (OS version), TTL is `loose` (check fingerprint's TTL) or `skip`
   (don't check it).
