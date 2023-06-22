@@ -38,6 +38,11 @@ changes upstream.
 - Q: What license is this available under?
 - A: GPL2.0-or-later, same as nftables (some parts of nftables are GPL2
   only though).
+- Q: How do I apply JSON rules?
+- A: If you run `nft` with the `-j` flag, it allows you to load json
+  rulesets. Also, you can quickly apply small commands via `nft -j
+  '{"nftables":[ ...your rules here ]}'`. You can't currently do this
+  via `networking.nftables`.
 
 ## Example using the "fancy" DSL
 
