@@ -224,6 +224,7 @@ A: I don't know exactly, initial release memo says "This is currently
 - `json_parse_map_expr`:
   - ensure key is valid map lhs expr
   - ensure data is valid rhs expr
+    - usually this is a set expression
 - `json_parse_set_elem_expr`:
   - ensure `val` is a valid expr (same context)
   - get optional timeout (seconds), expires (seconds), comment (str)

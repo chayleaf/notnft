@@ -139,7 +139,10 @@ The following statements are supported:
 - `snat <ip>` / `snat <ip> <port>` / `snat { ... }` /
   `snat <ip> { ... }` / `snat <ip> <port> { ... }` - perform source
   network address translation, optionally specifying ip/port, optionally
-  specifying the rest of the attrs (refer to libnftables-json docs)
+  specifying the rest of the attrs (refer to libnftables-json docs).
+  - In `inet` tables you have to specify the family. You can do it by
+    calling `snat.ip` / `snat.ip6` instead of `snat`, or alternatively
+    you can specify a family in the attrs.
 - `dnat` - same syntax as above, but destination network address
   translation
 - `masquerade <port>` / `masquerade { ... }` /
@@ -182,7 +185,8 @@ The following statements are supported:
   Mapping can either be a list of lists of size 2 (each being a
   key-value pair), or if the keys are strings it can be an attrset.
 - `cidr <prefix> <length>` - create an IP prefix expression (e.g.
-  `127.0.0.0/8` is `cidr "127.0.0.1" 8`)
+  `127.0.0.0/8` is `cidr "127.0.0.1" 8`). Alternatively, `cidr
+  "<prefix>/<length>` works too.
 - `range a b` - a range from a to b, same as nftables's `a-b`
 - `payload.<protocol>.<field>` - access a protocol's field. It is
   convenient to do `with payload;` to be able to quickly access each

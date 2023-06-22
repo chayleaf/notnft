@@ -2,13 +2,14 @@
 
 let
   isSpecial = x: builtins.isAttrs x && builtins.any (lib.hasPrefix "__") (builtins.attrNames x);
-  fixupStmts = stmts:
-    if builtins.isList stmts then map fixupStmts stmts
+  fixup = stmts:
+    if builtins.isList stmts then map fixup stmts
     else if !(builtins.isAttrs stmts) then stmts
     else if (stmts.__enumName__ or "") == "oneEnumToRuleThemAll" then throw "Couldn't resolve ${stmts} from One Enum to Rule Them All"
-    else if stmts?__expr__ then fixupStmts stmts.__expr__
+    else if stmts?__expr__ then fixup stmts.__expr__
+    else if stmts?__cmd__ then fixup stmts.__cmd__
     else if isSpecial stmts then stmts
-    else builtins.mapAttrs (k: fixupStmts) stmts;
+    else builtins.mapAttrs (k: fixup) stmts;
   enumHacks =
     if hacks then
       enum: val:
@@ -43,12 +44,84 @@ let
     if builtins.isFunction v then v enums.${k}
     else if (v.__enumName__ or "") == "oneEnumToRuleThemAll" && enums?${k}.${toString v} then enums.${k}.${toString v}
     else v);
+  extractNames = expr:
+    if builtins.isString expr then [ expr ]
+    else if expr?set then builtins.concatLists (lib.mapAttrsToList (k: extractNames) expr.set)
+    else if expr?map.data then builtins.concatLists (lib.mapAttrsToList (k: extractNames) expr.map.data)
+    else [ ];
+  allDeps = attrs: let fn0 = (vis: let fn = (val:
+    if builtins.isList val then builtins.concatLists (map fn val)
+    else if val?__cmd__ then fn val.__cmd__
+    else if val?__expr__ then fn val.__expr__
+    else if val?jump.target || val?goto.target || (builtins.isString val && lib.hasPrefix "@" val) then let
+      tgt = val.jump.target or val.goto.target or (lib.removePrefix "@" val);
+      vis' = assert lib.assertMsg (!vis?${tgt}) "Ruleset recursion detected for ${tgt}!"; vis // {
+        ${tgt} = null;
+      };
+    in [ tgt ] ++ lib.optionals (attrs?${tgt}) (fn0 vis' attrs.${tgt})
+    else if
+      (val?synproxy && !val?synproxy.mss && !val?synproxy.wscale && !val?synproxy.flags)
+      || val?secmark || val?"ct expectation" || val?"ct timeout"
+      || val?"ct helper" || val?limit || val?quota || val?counter
+    then let
+      expr = val.synproxy or val.secmark or val."ct expectation" or val."ct timeout"
+        or val."ct helper" or val.limit or val.quota or val.counter;
+      names = extractNames expr;
+    in
+      builtins.concatLists (map (tgt: let
+        vis' = assert lib.assertMsg (!vis?${tgt}) "Ruleset recursion detected for ${tgt}!"; vis // {
+          ${tgt} = null;
+        };
+        in [ tgt ] ++ lib.optionals (attrs?${tgt}) (fn0 vis' attrs.${tgt})) names)
+    else if !(builtins.isAttrs val) then [ ]
+    else builtins.concatLists (lib.mapAttrsToList (k: fn) val)
+  ); in fn); in fn0;
+  cacheDeps = attrs: builtins.mapAttrs (k: v: allDeps attrs { ${k} = null; } v) attrs;
   mkObj = name: enums: attrs:
     fillEnums (fillEnum attrs enums) attrs;
   # takeAttrs = names: lib.filterAttrs (k: v: builtins.elem k names);
   finalize = attrs: x:
     if x?__finalize then x.__finalize x attrs
     else fillEnum attrs x;
+  wrapCmd = cmd: cmd // lib.optionalAttrs (cmd?__finalize) {
+    __cmd__ = finalize { } cmd;
+  };
+  mkNat = key: rec {
+    ip = {
+      inherit __functor;
+      __attrs__.family = notnft.ipFamilies.ip;
+    };
+    ip6 = {
+      inherit __functor;
+      __attrs__.family = notnft.ipFamilies.ip6;
+    };
+    __attrs__ = { };
+    __functor = self: x:
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; family = notnft.ipFamilies; };
+    in if builtins.isAttrs x then {
+      ${key} = self.__attrs__ // fill x;
+    } else {
+      __expr__.${key} = self.__attrs__ // { addr = x; };
+      __functor = self: attrs:
+        if builtins.isInt attrs then {
+          __expr__.${key} = self.__expr__.${key} // { port = attrs; };
+          __functor = self: attrs: { ${key} = self.__expr__.${key} // fill attrs; };
+        } else { ${key} = self.__expr__.${key} // fill attrs; };
+    };
+  };
+  mkNatLite = key:
+    let
+      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; };
+    in {
+      __expr__.${key} = { };
+      __functor = self: x: if builtins.isInt x then {
+        __expr__.${key}.port = x;
+        __functor = self: attrs: { ${key} = self.__expr__.${key} // fill attrs; };
+      } else {
+        ${key} = fill x;
+      };
+    };
   mkCmd = cmd': obj0:
     if obj0 == self.existing then obj0: mkCmd cmd' (obj0 // { __existing__ = true; _ = null; }) else (let
       family = { family = notnft.families; };
@@ -112,13 +185,13 @@ let
         if cmd' == "insert" then a: b: lib.toList b ++ a
         else a: b: a ++ lib.toList b;
     in
-      if obj == "table" then let fn = initial: {
+      if obj == "table" then let fn = initial: wrapCmd {
         __list__ = [ ];
         __attrs__ = { };
         __functor = self: x:
-          if isSpecial x then self // { __list__ = self.__list__ ++ lib.toList x; }
+          wrapCmd (if isSpecial x then self // { __list__ = self.__list__ ++ lib.toList x; }
           else if builtins.isList x then self // { __list__ = builtins.concatLists ([ self.__list__ ] ++ map lib.toList x); }
-          else self // { __attrs__ = self.__attrs__ // x; };
+          else self // { __attrs__ = self.__attrs__ // x; });
         __finalize = self: attrs:
           let
             obj'' = initial // fillEnum (initial // attrs) obj';
@@ -128,22 +201,29 @@ let
               inherit (obj'') family;
               table = obj''.name;
             } x)) self.__list__)
-            ++ (lib.mapAttrsToList (k: v: lib.toList (finalize {
-              inherit (obj'') family;
-              table = obj''.name;
-              name = k;
-            } v)) self.__attrs__));
+            ++ (let
+              finalized = builtins.mapAttrs (k: v:
+                finalize {
+                  inherit (obj'') family;
+                  table = obj''.name;
+                  name = k;
+                } v
+              ) self.__attrs__;
+              deps = cacheDeps finalized;
+              list = lib.mapAttrsToList (name: value: { inherit name value; }) finalized;
+              sorted = (lib.lists.toposort (a: b: builtins.elem a.name (deps.${b.name} or [])) list).result;
+            in map (x: lib.toList x.value) sorted));
       }; in fn initial // {
         __functor = self: arg: if !(isSpecial arg) && (arg?comment || arg?family || arg?name || arg?handle) then fn (initial // arg) else fn initial arg;
-      } else if obj == "chain" then let fn = initial: {
+      } else if obj == "chain" then let fn = initial: wrapCmd {
         __list__ = [ ];
         __functor = self: x:
-          if isSpecial x then self // { __list__ = extend self.__list__ x; }
+          wrapCmd (if isSpecial x then self // { __list__ = extend self.__list__ x; }
           else if x == [] || builtins.isList (builtins.head x) then self // {
             __list__ = builtins.foldl' (a: b: extend a [ b ]) self.__list__ x;
           } else self // {
             __list__ = extend self.__list__ [ x ];
-          };
+          });
         __finalize = self': attrs:
           let
             obj'' = initial // fillEnum (initial // attrs) obj';
@@ -153,18 +233,18 @@ let
               lib.toList (if builtins.isList x then (finalize { } (mkCmd cmd' self.rule {
                 inherit (obj'') family table;
                 chain = obj''.name;
-                expr = fixupStmts x;
+                expr = fixup x;
               })) else let tmp = finalize ({
                 inherit (obj'') family table;
                 chain = obj''.name;
-              }) x; in tmp // { expr = fixupStmts tmp.expr; })) self'.__list__);
+              }) x; in tmp // { expr = fixup tmp.expr; })) self'.__list__);
       }; in fn initial // {
         __functor = self: arg: if !(isSpecial arg) && builtins.any (field: arg?${field}) [ "family" "table" "name" "type" "hook" "prio" "dev" "policy" "comment" "handle" "newname" ] then fn (initial // arg) else fn initial arg;
-      } else if obj == "set" || obj == "map" then let fn = initial: {
+      } else if obj == "set" || obj == "map" then let fn = initial: wrapCmd {
         __list__ = [ ];
-        __functor = self: x: self // {
+        __functor = self: x: wrapCmd (self // {
           __list__ = self.__list__ ++ x;
-        };
+        });
         __finalize = self: args:
           let
             obj'' = initial // fillEnum (initial // args) obj';
@@ -172,18 +252,22 @@ let
             if existing then {
               ${cmd}.element = {
                 inherit (obj'') family table name;
-                elem = map fixupStmts self.__list__;
+              } // lib.optionalAttrs (self.__list__ != [ ]) {
+                elem = map fixup self.__list__;
               };
             } else {
-              ${cmd}.${obj} = obj'' // {
-                elem = map fixupStmts self.__list__;
+              ${cmd}.${obj} = obj''
+              // lib.optionalAttrs (self.__list__ != [ ]) {
+                elem = map fixup self.__list__;
               };
             };
       }; in fn initial // {
         __functor = self: arg:
           if !(isSpecial arg) && builtins.isAttrs arg && builtins.any (field: arg?${field}) [ "table" "name" "type" "map" "policy" "flags" "elem" "timeout" "gc-interval" "size" "stmt" "handle" ] then fn (initial // arg) else fn initial arg;
-      } else {
-        __functor = self: args: let initial' = initial // args; in {
+      } else if lib.hasSuffix "s" obj || obj == "ruleset" then {
+        ${cmd}.${obj} = null;
+      } else wrapCmd {
+        __functor = self: args: let initial' = initial // args; in wrapCmd {
           __finalize = self: args: {
             ${cmd}.${obj} = initial' // fillEnum (initial' // args) obj';
           };
@@ -228,7 +312,6 @@ self = rec {
   rules = { __object__ = "rules"; };
   chain = { __object__ = "chain"; };
   chains = { __object__ = "chains"; };
-  set = { __object__ = "set"; };
   sets = { __object__ = "sets"; };
   maps = { __object__ = "maps"; };
   flowtable = { __object__ = "flowtable"; };
@@ -250,7 +333,7 @@ self = rec {
         then builtins.concatLists (lib.mapAttrsToList
           (name: val: lib.toList (finalize { inherit name; } val))
           attrs)
-        else assert builtins.isList attrs; builtins.concatLists (map lib.toList attrs);
+        else assert builtins.isList attrs; builtins.concatLists (builtins.map lib.toList attrs);
     };
   };
   match = builtins.mapAttrs (_: op: left: right: {
@@ -397,14 +480,18 @@ self = rec {
       result = fillEnum notnft.fibResults result';
     in
       { fib = { inherit flags result; }; };
-  # anonymous set
   set = {
+    # set command
+    __object__ = "set"; 
     # set statement
     add = set: elem: { set = { op = notnft.setOps.add; inherit set elem; }; };
     update = set: elem: { set = { op = notnft.setOps.update; inherit set elem; }; };
     delete = set: elem: { set = { op = notnft.setOps.delete; inherit set elem; }; };
     # set expr
-    __functor = self: x: { set = x; };
+    __functor = self: x: {
+      set = if builtins.isList x then x
+        else lib.mapAttrsToList (k: v: [ k v ]) x;
+    };
   };
   map = {
     __object__ = "map";
@@ -412,10 +499,10 @@ self = rec {
       map = {
         inherit key;
         data =
-          if builtins.isList data then
+          set (if builtins.isList data then
             let merged = notnft.exprEnumsMerged key;
             in map (kv: deepFillEnum' merged (builtins.head kv) ++ builtins.tail kv) (fillEnum merged data)
-          else lib.mapAttrsToList (k: v: [ k v ]) data;
+          else data);
       };
     };
   };
@@ -428,57 +515,18 @@ self = rec {
     notrack = null;
   };
   dup = attrs: { dup = attrs; };
-  cidr = addr: len: { prefix = { inherit addr len; }; };
-  snat = x:
-    let
-      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; family = notnft.ipFamilies; };
-    in if builtins.isAttrs x then {
-      snat = fill x;
-    } else {
-      __expr__.snat.addr = x;
-      __functor = self: attrs:
-        if builtins.isInt attrs then {
-          __expr__.snat = self.__expr__.snat // { port = attrs; };
-          __functor = self: attrs: { snat = self.__expr__.snat // fill attrs; };
-        } else { snat = self.__expr__.snat // fill attrs; };
-    };
-  dnat = x:
-    let
-      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; family = notnft.ipFamilies; };
-    in if builtins.isAttrs x then {
-      dnat = fill x;
-    } else {
-      __expr__.dnat.addr = x;
-      __functor = self: attrs:
-        if builtins.isInt attrs then {
-          __expr__.dnat = self.__expr__.dnat // { port = attrs; };
-          __functor = self: attrs: { dnat = self.__expr__.dnat // fill attrs; };
-        } else { dnat = self.__expr__.dnat // fill attrs; };
-    };
-  masquerade =
-    let
-      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; };
-    in {
-      __expr__.masquerade = { };
-      __functor = self: x: if builtins.isInt x then {
-        __expr__.masquerade.port = x;
-        __functor = self: attrs: { masquerade = self.__expr__.masquerade // fill attrs; };
-      } else {
-        masquerade = fill x;
+  cidr = addr: if lib.hasInfix "/" addr then
+    let split = lib.splitString "/" addr; in {
+      prefix = {
+        addr = builtins.head split;
+        len = builtins.fromJSON (builtins.elemAt split 1);
       };
-    };
-  redirect =
-    let
-      fill = fillEnums { flags = notnft.natFlags; type_flags = notnft.natTypeFlags; };
-    in {
-      __expr__.redirect = { };
-      __functor = self: x: if builtins.isInt x then {
-        __expr__.redirect.port = x;
-        __functor = self: attrs: { redirect = self.__expr__.redirect // fill attrs; };
-      } else {
-        redirect = fill x;
-      };
-    };
+    }
+  else (len: { prefix = { inherit addr len; }; });
+  snat = mkNat "snat";
+  dnat = mkNat "dnat";
+  masquerade = mkNatLite "masquerade";
+  redirect = mkNatLite "redirect";
   reject = {
     __expr__.reject = { };
     __functor = self: attrs:  {
@@ -488,7 +536,7 @@ self = rec {
   vmap = key: data: {
     vmap = {
       inherit key;
-      data = if builtins.isList data then data else lib.mapAttrsToList (k: v: [ k v ]) data;
+      data = set data;
     };
   };
   elem = attrs:
@@ -522,7 +570,7 @@ self = rec {
     };
   };
   log = attrs: {
-    log = fillEnums { level = notnft.logLevels; flags = notnft.logFlags; } attrs;
+    log = fillEnums { level = notnft.logLevels; flags = notnft.logFlags; } (if builtins.isString attrs then { prefix = attrs; } else attrs);
   };
   # ct helper set
   ctHelper = {
@@ -575,8 +623,5 @@ self = rec {
     __functor = self: secmark: { inherit secmark; };
   };
   inherit (notnft) exists missing;
-  compileStmt = fixupStmts;
-  compileExpr = fixupStmts;
-  compileCmd = finalize { };
-  compile = x: if x?__fixup then compileCmd x else fixupStmts x;
+  compile = fixup;
 }; in self

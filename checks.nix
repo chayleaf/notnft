@@ -308,9 +308,11 @@ assert chkAdd { flowtable = {
 # REPLACE RULE
 # INSERT RULE
 
-
-### test config (manually converted from my old router)
 assert (flake.exprEnumsMerged dsl.payload.tcp.flags)?syn;
+assert chkTypeJson types.ruleset (flake.dsl.compile (flake.dsl.ruleset [
+  (flake.dsl.flush flake.dsl.ruleset)
+]));
+### test config (manually converted from my old router)
 assert chkTypeJson types.ruleset (with flake.dsl.oneEnumToRuleThemAll; with payload; ruleset {
   filter = add table.netdev {
     ingress_common = add chain [

@@ -1,7 +1,6 @@
 { lib
 , config ? {}
-, ...
-}:
+, ... }:
 
 let
   cfg = config.notnft or {};
@@ -600,8 +599,8 @@ let
         };
         elem = {
           type =
-            if isMap == true then lib.types.listOf (types.listOfSize2 types.expression)
-            else types.expression;
+            if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
+            else lib.types.nonEmptyListOf types.expression;
           description = lib.mdDoc ("Initial ${name} element(s)." + (lib.optionalString (isMap != false) " For mappings, an array of arrays with exactly two elements is expected."));
         };
         timeout = {
@@ -660,8 +659,8 @@ let
       } // (if withElem then builtins.mapAttrs mkOpt {
         elem = {
           type =
-            if isMap == true then lib.types.listOf (types.listOfSize2 types.expression)
-            else types.expression;
+            if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
+            else lib.types.nonEmptyListOf types.expression;
           description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
         };
       } else {});
@@ -1379,6 +1378,14 @@ let
       reqFields = [ "family" ];
       withHandle = true;
     };
+    dslCmdHack = type: lib.types.either (submodule' {
+      skipNulls = false;
+      finalMerge = x: x.__cmd__;
+      freeformType = lib.types.unspecified;
+      options.__cmd__ = lib.mkOption {
+        inherit type;
+      };
+    }) type;
     # anything but delete
     tableToAdd = mkTableType { reqFields = [ "name" "family" ]; withExtraFields = true; };
     tableToWhatever = mkTableType { reqFields = [ "name" "family" ]; };
@@ -1666,7 +1673,7 @@ let
       name = "nftablesAddCommand";
       description = "add command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Add ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -1698,7 +1705,7 @@ let
       name = "nftablesCreateCommand";
       description = "nftables create command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Create ${k} (same as add, but ensure it doesn't already exist).";
       })) {
         table = types.tableToWhatever;
@@ -1721,7 +1728,7 @@ let
     insertCommand = lib.types.submodule {
       options = {
         rule = lib.mkOption {
-          type = types.ruleToAdd;
+          type = types.dslCmdHack types.ruleToAdd;
           description = "rule to insert (prepend)";
         };
       };
@@ -1730,7 +1737,7 @@ let
       name = "nftablesDeleteCommand";
       description = "nftables delete command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Delete ${k}.";
       })) {
         table = types.tableToDelete;
@@ -1754,7 +1761,7 @@ let
       name = "nftablesDestroyCommand";
       description = "nftables destroy command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Destroy ${k}.";
       })) {
         table = types.tableToDelete;
@@ -1785,7 +1792,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "List ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -1823,7 +1830,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Reset ${k}.";
       })) {
         counter = types.counterToWhatever;
@@ -1838,7 +1845,7 @@ let
       name = "nftablesListCommand";
       description = "nftables list command";
       types = lib.mapAttrsToList (k: v: submoduleSK k (lib.mkOption {
-        type = v;
+        type = types.dslCmdHack v;
         description = "Flush ${k}.";
       })) {
         table = types.tableToWhatever;
@@ -2216,8 +2223,8 @@ let
         type = types.expression;
       };
       options.data = lib.mkOption {
-        description = "Mapping expression consisting of value/verdict pairs.";
-        type = lib.types.listOf (types.listOfSize2 types.expression);
+        description = "Mapping expression consisting of a set with value/verdict pairs.";
+        type = types.expression;
       };
     };
     ctCountStatement = submodule' {
@@ -2465,7 +2472,7 @@ let
         type = types.expression;
       };
       options.data = lib.mkOption {
-        description = "Mapping expression consisting of value/target pairs.";
+        description = "Mapping expression consisting of a set with value/target pairs.";
         type = types.expression;
       };
     };

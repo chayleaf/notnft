@@ -10,9 +10,8 @@
     in
     {
       nixosModules.default = import ./.;
-      # this isn't an officially supported third-party flake output
-      # homeManagerModules.default = ./.;
-      lib = forEachSystem ({ pkgs, ... }: (import ./. { inherit pkgs; inherit (pkgs) lib; }).config.notlua);
+      homeManagerModules.default = import ./.;
+      lib = forEachSystem ({ pkgs, ... }: (import ./. { inherit (pkgs) lib; }).config.notnft);
       checks.x86_64-linux.default = let pkgs = nixpkgs.legacyPackages.x86_64-linux; in pkgs.callPackage ./checks.nix {
         flake = (pkgs.callPackage ./. { }).config.notnft;
       };
