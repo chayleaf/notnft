@@ -237,7 +237,7 @@ let
               })) else let tmp = finalize ({
                 inherit (obj'') family table;
                 chain = obj''.name;
-              }) x; in tmp // { expr = fixup tmp.expr; })) self'.__list__);
+              }) x; in tmp // lib.optionalAttrs (tmp?expr) { expr = fixup tmp.expr; })) self'.__list__);
       }; in fn initial // {
         __functor = self: arg: if !(isSpecial arg) && builtins.any (field: arg?${field}) [ "family" "table" "name" "type" "hook" "prio" "dev" "policy" "comment" "handle" "newname" ] then fn (initial // arg) else fn initial arg;
       } else if obj == "set" || obj == "map" then let fn = initial: wrapCmd {

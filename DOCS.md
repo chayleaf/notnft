@@ -154,6 +154,7 @@ The following statements are supported:
 - `set.add <set> <elem>` / `set.update <set> <elem>` /
   `set.delete <set> <elem>` - add/update/delete `elem` to/from `set`
 - `log { ... }` - log with attrs (see libnftables-json docs)
+  - `log "..."` - log with prefix
 - `ctHelper <expr>` - set a packet's ct helper to `<expr>`
 - `meter { ... }` - see libnftables-json docs
 - `queue { ... }` - see libnftables-json docs
@@ -186,7 +187,7 @@ The following statements are supported:
   key-value pair), or if the keys are strings it can be an attrset.
 - `cidr <prefix> <length>` - create an IP prefix expression (e.g.
   `127.0.0.0/8` is `cidr "127.0.0.1" 8`). Alternatively, `cidr
-  "<prefix>/<length>` works too.
+  "<prefix>/<length>"` works too.
 - `range a b` - a range from a to b, same as nftables's `a-b`
 - `payload.<protocol>.<field>` - access a protocol's field. It is
   convenient to do `with payload;` to be able to quickly access each

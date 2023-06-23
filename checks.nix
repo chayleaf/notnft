@@ -29,8 +29,6 @@ let
   # by toJSON. This means that despite merging to a different value (string rather than opaque enum),
   # values are still considered equal.
   chkExprJson = chkTypeJson types.expression;
-  # check that the second arg is an expression and the merged value equals the first arg
-  chkExprEq = chkTypeEq types.expression;
   # check that evaluation of `x` fails
   fails = x: !(builtins.tryEval x).success;
 
@@ -82,7 +80,6 @@ assert fails (chkExpr { map = { key = 1; data = null; }; });
 assert chkExpr { prefix = { addr = "127.0.0.0"; len = 8; }; };
 # range expr
 assert chkExpr { range = [ 1 2 ]; };
-assert chkExprEq { range = [ 1 2 ]; } { range = { min = 1; max = 2; }; };
 assert fails (chkExpr { range = [ 1 ]; });
 assert fails (chkExpr { range = [ 1 2 3 ]; });
 # payload expr
@@ -152,7 +149,6 @@ assert fails (chkExprJson { fib = { result = flake.fibResults.type; flags = with
 assert fails (chkExprJson { fib = { result = flake.fibResults.type; flags = with flake.fibFlags; [ saddr mark iif oif ]; }; });
 # |/^/&/<</>> exprs
 assert chkExpr { "|" = [ 5 5 ]; };
-assert chkExprEq { "|" = [ 5 5 ]; } { "|" = { left = 5; right = 5; }; };
 assert chkExpr { "^" = [ { "&" = [ 1 2 ]; } { "<<" = [ { ">>" = [ 5 6 ]; } 7 ]; } ]; };
 # verdicts (accept/drop/continue/return/jump/goto exprs)
 assert chkExpr { accept = null; };

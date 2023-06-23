@@ -2455,17 +2455,7 @@ let
         };
       };
     };
-    rangeExpression = lib.types.either (types.listOfSize2 types.expression) (submodule' {
-      finalMerge = { min, max }: [ min max ];
-      options.min = lib.mkOption {
-        description = "lower bound of a range";
-        type = types.expression;
-      };
-      options.max = lib.mkOption {
-        description = "upper bound of a range";
-        type = types.expression;
-      };
-    });
+    rangeExpression = types.listOfSize2 types.expression;
     mapExpression = lib.types.submodule {
       options.key = lib.mkOption {
         description = "Map key.";
@@ -2746,17 +2736,7 @@ let
         type = lib.types.either types.fibFlag (lib.types.listOf types.fibFlag);
       };
     };
-    binOpExpression = lib.types.either (types.listOfSize2 types.expression) (submodule' {
-      finalMerge = { left, right }: [ left right ];
-      options.left = lib.mkOption {
-        description = "Left-hand side of the operation.";
-        type = types.expression;
-      };
-      options.right = lib.mkOption {
-        description = "Right-hand side of the operation.";
-        type = types.expression;
-      };
-    });
+    binOpExpression = types.listOfSize2 types.expression;
     elemExpression = submodule' {
       options.val = lib.mkOption {
         description = "Set element.";
