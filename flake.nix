@@ -3,9 +3,9 @@
 
   outputs = { self, nixpkgs }:
     let
-      forEachSystem = func: nixpkgs.lib.genAttrs [ "aarch64-linux" "aarch64-darwin" "x86_64-darwin" "x86_64-linux" ] (system: {
+      forEachSystem = func: nixpkgs.lib.genAttrs [ "aarch64-linux" "aarch64-darwin" "x86_64-darwin" "x86_64-linux" ] (system: func {
         inherit system;
-        result = func { inherit system; pkgs = import nixpkgs { inherit system; }; };
+        pkgs = import nixpkgs { inherit system; };
       });
     in
     {
