@@ -358,17 +358,20 @@ let
     nestedTypes = builtins.listToAttrs (lib.imap0 (i: x: { name = toString i; value = x; }) types);
     typeMerge = null;
     merge = loc: defs:
-      (let
+      let
+        validTypes = builtins.filter (type: builtins.all ({ value, ... }: type.check value) defs) types;
         res = builtins.foldl'
-          (x: type: if x != null then x else
-            let val = builtins.tryEval (type.merge loc defs);
-            in if val.success then val.value else x)
-          null
-          (builtins.filter (type: builtins.all ({ value, ... }: let ret = type.check value; in ret) defs) types);
+                (x: type: if x != null then x else
+                  let val = builtins.tryEval (type.merge loc defs);
+                  in if val.success then val.value else x)
+                null
+                validTypes;
       in
-        if res == null
-        then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
-        else res);
+        if builtins.length validTypes == 1
+          then (builtins.head validTypes).merge loc defs
+        else if res == null
+          then throw "The definition of option `${lib.showOption loc}` isn't a valid ${description}. Definition values:${lib.options.showDefs defs}"
+        else res;
   };
 
   stringLike = lib.mkOptionType {
