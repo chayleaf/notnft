@@ -535,7 +535,7 @@ let
       } else {})
       // (if withIndex then builtins.mapAttrs mkOpt {
         index = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = lib.mdDoc "The rule’s position for add/insert commands. It is used as an alternative to handle then.";
         };
       } else {})
@@ -607,15 +607,15 @@ let
           description = lib.mdDoc ("Initial ${name} element(s)." + (lib.optionalString (isMap != false) " For mappings, an array of arrays with exactly two elements is expected."));
         };
         timeout = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "Element timeout in seconds.";
         };
         gc-interval = {
-          type = lib.types.int;
+          type = lib.types.ints.u32;
           description = "Garbage collector interval in seconds.";
         };
         size = {
-          type = lib.types.int;
+          type = lib.types.ints.u32;
           description = "Maximum number of elements supported.";
         };
         stmt = {
@@ -730,11 +730,11 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         packets = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "Packet counter value.";
         };
         bytes = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "Byte counter value.";
         };
         comment = {
@@ -770,11 +770,11 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         bytes = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "Quota threshold.";
         };
         used = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "Quota used so far.";
         };
         inv = {
@@ -886,7 +886,7 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         rate = {
-          type = lib.types.int;
+          type = lib.types.ints.unsigned;
           description = "The limit’s rate value.";
         };
         per = {
@@ -900,7 +900,7 @@ let
           defaultText = lib.literalExpression "packets";
         };
         burst = {
-          type = lib.types.int;
+          type = lib.types.ints.u32;
           description = lib.mdDoc "The limit’s burst value. If omitted, defaults to **0**.";
           defaultText = lib.literalExpression 0;
         };
@@ -955,8 +955,8 @@ let
           description = lib.mdDoc ''The ct timeout object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
         policy = {
-          type = lib.types.attrsOf lib.types.int;
-          description = "Undocumented upstream, each key might be conn state name (`established`, `syn_sent`, `close_wait`, etc), each val might be timeout value";
+          type = lib.types.attrsOf lib.types.ints.u32;
+          description = "Undocumented upstream, each key is conn state name (`established`, `syn_sent`, `close_wait`, etc), each val is timeout value";
         };
         comment = {
           type = lib.types.str;
@@ -999,15 +999,15 @@ let
           description = "The ct expectation object’s layer 4 protocol.";
         };
         dport = {
-          type = lib.types.int;
+          type = lib.types.port;
           description = "The destination port of the expected connection.";
         };
         timeout = {
-          type = lib.types.int;
+          type = lib.types.ints.u32;
           description = "The time in millisecond that this expectation will live.";
         };
         size = {
-          type = lib.types.int;
+          type = lib.types.ints.u8;
           description = "The maximum count of expectations to be living in the same time.";
         };
         comment = {
@@ -1043,11 +1043,11 @@ let
       }
       // (if withExtraFields then builtins.mapAttrs mkOpt {
         mss = {
-          type = lib.types.int;
+          type = lib.types.ints.u16;
           description = "Maximum segment size announced to clients.";
         };
         wscale = {
-          type = lib.types.int;
+          type = lib.types.ints.u8;
           description = "Window scale announced to clients.";
         };
         flags = {
@@ -1616,6 +1616,11 @@ let
       reqFields = [ "family" "table" "name" ];
     };
     ctTimeoutToAdd = mkCtTimeoutType {
+      finalMerge = x:
+        if x?policy then assert lib.assertMsg
+          (builtins.all (k: builtins.elem k (builtins.attrNames connectionStates)) (builtins.attrNames x.policy))
+          "Policy keys must be valid connection states"; x
+        else x;
       reqFields = [ "family" "table" "name" "type" "protocol" "state" "value" ];
       withExtraFields = true;
     };
@@ -1947,11 +1952,11 @@ let
     };
     counterStatement = lib.types.submodule {
       options.packets = lib.mkOption {
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
         description = "Packets counted";
       };
       options.bytes = lib.mkOption {
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
         description = "Byte counter value.";
       };
     };
@@ -1976,7 +1981,7 @@ let
     quotaStatement = submodule' {
       finalMerge = x: if x?used_unit && !x?used then throw "If quota stmt has used_unit, must specify used as well" else x;
       options.val = lib.mkOption {
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
         description = "Quota value.";
       };
       options.val_unit = lib.mkOption {
@@ -1985,7 +1990,7 @@ let
         defaultText = lib.literalExpression "bytes";
       };
       options.used = mkNullOption {
-        type = types.int;
+        type = types.ints.unsigned;
         description = "Quota used so far. Optional on input. If given, serves as initial value.";
       };
       options.used_unit = mkNullOption {
@@ -2002,7 +2007,7 @@ let
     limitStatement = submodule' {
       finalMerge = x: if (x.rate_unit or "packets") == "packets" && x?burst_unit then throw "burst_unit is ignored when rate_unit is \"packets\", don't set it" else x;
       options.rate = lib.mkOption {
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
         description = "Rate value to limit to.";
       };
       options.rate_unit = mkNullOption {
@@ -2015,7 +2020,7 @@ let
         description = lib.mdDoc ''Denominator of rate, e.g. **"week"** or **"minutes"**.'';
       };
       options.burst = mkNullOption {
-        type = lib.types.int;
+        type = lib.types.ints.u32;
         description = lib.mdDoc "Burst value. Defaults to **0**.";
         defaultText = lib.literalExpression 0;
       };
@@ -2100,7 +2105,7 @@ let
           "Nat statement's expressions are invalid in this context";
         ret;
       options.port = mkNullOption {
-        type = lib.types.int;
+        type = lib.types.port;
         description = "Port to translate to.";
       };
       options.flags = mkNullOption {
@@ -2160,15 +2165,15 @@ let
       };
       options.group = mkNullOption {
         description = "Log group.";
-        type = lib.types.int;
+        type = lib.types.ints.u16;
       };
       options.snaplen = mkNullOption {
         description = "Snaplen for logging.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.queue-threshold = mkNullOption {
         description = "Queue threshold.";
-        type = lib.types.int;
+        type = lib.types.ints.u16;
       };
       options.level = mkNullOption {
         description = lib.mdDoc ''Log level. Defaults to **"warn"**.'';
@@ -2201,7 +2206,7 @@ let
       };
       options.size = mkNullOption {
         description = "Meter size.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
     };
     queueStatement = submodule' {
@@ -2233,7 +2238,7 @@ let
     ctCountStatement = submodule' {
       options.val = lib.mkOption {
         description = "Connection count threshold.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.inv = mkNullOption {
         type = lib.types.bool;
@@ -2282,11 +2287,11 @@ let
     synproxyStatement = submodule' {
       chk = x: x?mss || x?wscale || x?flags;
       options.mss = mkNullOption {
-        type = types.int;
+        type = types.ints.u16;
         description = "Maximum segment size announced to clients. This must match the backend.";
       };
       options.wscale = mkNullOption {
-        type = types.int;
+        type = types.ints.u8;
         description = "Window scale announced to clients. This must match the backend.";
       };
       options.flags = mkNullOption {
@@ -2476,7 +2481,7 @@ let
       };
       options.len = lib.mkOption {
         description = "Prefix length.";
-        type = lib.types.int;
+        type = lib.types.ints.between 0 128;
       };
     };
     rawPayloadExpression = submodule' {
@@ -2487,11 +2492,11 @@ let
       };
       options.offset = lib.mkOption {
         description = "Payload offset.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.len = lib.mkOption {
         description = "Payload length.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
     };
     namedPayloadExpression = submodule' {
@@ -2536,22 +2541,22 @@ let
       };
       options.offset = mkNullOption {
         description = lib.mdDoc "Field **offset** (used only for **rt0** protocol).";
-        type = lib.types.int;
+        type = lib.types.ints.u16;
       };
     };
     # undocumented
     rawTcpOptionExpression = lib.types.submodule {
       options.base = lib.mkOption {
         description = "TCP option kind (numeric).";
-        type = lib.types.int;
+        type = lib.types.ints.u8;
       };
       options.offset = lib.mkOption {
         description = "Data byte offset in TCP option.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.len = lib.mkOption {
         description = "Data byte length in TCP option.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
     };
     namedTcpOptionExpression = submodule' {
@@ -2667,7 +2672,7 @@ let
       };
       options.spnum = mkNullOption {
         description = "Undocumented upstream";
-        type = lib.types.int;
+        type = lib.types.ints.u8;
       };
     };
     numgenExpression = submodule' {
@@ -2677,22 +2682,22 @@ let
       };
       options.mod = lib.mkOption {
         description = "Number modulus (number of different values possible).";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.offset = mkNullOption {
         description = "Number offset (added to the result). Defaults to 0.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
         defaultText = lib.literalExpression 0;
       };
     };
     jhashExpression = submodule' {
       options.mod = lib.mkOption {
         description = "Hash modulus (number of possible different values).";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.offset = mkNullOption {
         description = "Hash offset (min value). Defaults to 0.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
         defaultText = lib.literalExpression 0;
       };
       options.expr = lib.mkOption {
@@ -2701,18 +2706,18 @@ let
       };
       options.seed = mkNullOption {
         description = "Hash seed. Defaults to 0.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
         defaultText = lib.literalExpression 0;
       };
     };
     symhashExpression = submodule' {
       options.mod = lib.mkOption {
         description = "Hash modulus (number of possible different values).";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
       };
       options.offset = mkNullOption {
         description = "Hash offset (min value). Defaults to 0.";
-        type = lib.types.int;
+        type = lib.types.ints.u32;
         defaultText = lib.literalExpression 0;
       };
     };
@@ -2747,11 +2752,11 @@ let
       };
       options.timeout = mkNullOption {
         description = lib.mdDoc "Timeout value for sets/maps with flag **timeout** (in seconds).";
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
       };
       options.expires = mkNullOption {
         description = "The time until given element expires (in seconds), useful for ruleset replication only.";
-        type = lib.types.int;
+        type = lib.types.ints.unsigned;
       };
       options.comment = mkNullOption {
         description = "Per element comment field";
@@ -2777,7 +2782,7 @@ let
     dccpOption = submodule' {
       options.type = lib.mkOption {
         description = "DCCP option type.";
-        type = lib.types.int;
+        type = lib.types.ints.u8;
       };
     };
     dslExprHackType = submodule' {
