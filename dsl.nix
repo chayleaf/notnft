@@ -44,39 +44,6 @@ let
     if builtins.isFunction v then v enums.${k}
     else if (v.__enumName__ or "") == "oneEnumToRuleThemAll" && enums?${k}.${toString v} then enums.${k}.${toString v}
     else v);
-  extractNames = expr:
-    if builtins.isString expr then [ expr ]
-    else if expr?set then builtins.concatLists (lib.mapAttrsToList (k: extractNames) expr.set)
-    else if expr?map.data then builtins.concatLists (lib.mapAttrsToList (k: extractNames) expr.map.data)
-    else [ ];
-  allDeps = attrs: let fn0 = (vis: let fn = (val:
-    if builtins.isList val then builtins.concatLists (map fn val)
-    else if val?__cmd__ then fn val.__cmd__
-    else if val?__expr__ then fn val.__expr__
-    else if val?jump.target || val?goto.target || (builtins.isString val && lib.hasPrefix "@" val) then let
-      tgt = val.jump.target or val.goto.target or (lib.removePrefix "@" val);
-      vis' = assert lib.assertMsg (!vis?${tgt}) "Ruleset recursion detected for ${tgt}!"; vis // {
-        ${tgt} = null;
-      };
-    in [ tgt ] ++ lib.optionals (attrs?${tgt}) (fn0 vis' attrs.${tgt})
-    else if
-      (val?synproxy && !val?synproxy.mss && !val?synproxy.wscale && !val?synproxy.flags)
-      || val?secmark || val?"ct expectation" || val?"ct timeout"
-      || val?"ct helper" || val?limit || val?quota || val?counter
-    then let
-      expr = val.synproxy or val.secmark or val."ct expectation" or val."ct timeout"
-        or val."ct helper" or val.limit or val.quota or val.counter;
-      names = extractNames expr;
-    in
-      builtins.concatLists (map (tgt: let
-        vis' = assert lib.assertMsg (!vis?${tgt}) "Ruleset recursion detected for ${tgt}!"; vis // {
-          ${tgt} = null;
-        };
-        in [ tgt ] ++ lib.optionals (attrs?${tgt}) (fn0 vis' attrs.${tgt})) names)
-    else if !(builtins.isAttrs val) then [ ]
-    else builtins.concatLists (lib.mapAttrsToList (k: fn) val)
-  ); in fn); in fn0;
-  cacheDeps = attrs: builtins.mapAttrs (k: v: allDeps attrs { ${k} = null; } v) attrs;
   mkObj = name: enums: attrs:
     fillEnums (fillEnum attrs enums) attrs;
   # takeAttrs = names: lib.filterAttrs (k: v: builtins.elem k names);
@@ -195,24 +162,59 @@ let
         __finalize = self: attrs:
           let
             obj'' = initial // fillEnum (initial // attrs) obj';
+            sortKeys = {
+              ruleset = 0;
+              table = 10;
+              default = 20;
+              # slightly later because they can have inline expressions
+              # (though I'm not sure they can reference anything in practice)
+              set = 21;
+              map = 21;
+              element = 30;
+              rule = 30;
+            };
+            sortKey = x:
+              let
+                commandObjs = builtins.attrValues x;
+                command = builtins.head (builtins.attrNames x);
+                objNames = builtins.attrNames (builtins.head commandObjs);
+                objName = builtins.head objNames;
+                # invert delete order (first delete rules, then chains, then tables)
+                # also do it before anything else
+                invert = builtins.elem command [
+                  "delete"
+                ];
+                # do those commands slightly later than add
+                addFive = builtins.elem command [
+                  "flush"
+                  "reset"
+                  "list"
+                  "replace"
+                  "rename"
+                ];
+                val = sortKeys.${objName} or sortKeys.default;
+              in
+                assert builtins.length commandObjs == 1 && builtins.length objNames == 1;
+                  if invert then -val
+                  else if addFive then val + 5
+                  else val;
           in
-            builtins.concatLists (lib.optional (!existing) [ { ${cmd}.table = obj''; } ]
-            ++ (map (x: lib.toList (finalize {
-              inherit (obj'') family;
-              table = obj''.name;
-            } x)) self.__list__)
-            ++ (let
-              finalized = builtins.mapAttrs (k: v:
-                finalize {
+            builtins.sort
+              (a: b: sortKey a < sortKey b)
+              (builtins.concatLists (lib.optional (!existing) [ { ${cmd}.table = obj''; } ]
+                ++ (map (x: lib.toList (finalize {
                   inherit (obj'') family;
                   table = obj''.name;
-                  name = k;
-                } v
-              ) self.__attrs__;
-              deps = cacheDeps finalized;
-              list = lib.mapAttrsToList (name: value: { inherit name value; }) finalized;
-              sorted = (lib.lists.toposort (a: b: builtins.elem a.name (deps.${b.name} or [])) list).result;
-            in map (x: lib.toList x.value) sorted));
+                } x)) self.__list__)
+                ++ (let
+                  finalized = builtins.mapAttrs (k: v:
+                    finalize {
+                      inherit (obj'') family;
+                      table = obj''.name;
+                      name = k;
+                    } v
+                  ) self.__attrs__;
+                in map lib.toList (builtins.attrValues finalized))));
       }; in fn initial // {
         __functor = self: arg: if !(isSpecial arg) && (arg?comment || arg?family || arg?name || arg?handle) then fn (initial // arg) else fn initial arg;
       } else if obj == "chain" then let fn = initial: wrapCmd {
