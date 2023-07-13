@@ -43,6 +43,9 @@ changes upstream.
   rulesets. Also, you can quickly apply small commands via `nft -j
   '{"nftables":[ ...your rules here ]}'`. You can't currently do this
   via `networking.nftables`.
+- Q: How to use this in my config?
+- A: Add this flake's `nixosModules.default` output, and then either use
+  `config.notnft` or the module argument `notnft`.
 
 ## Example using the "fancy" DSL
 

@@ -4138,8 +4138,8 @@ let
   connectionStates = builtins.mapAttrs (k: v: k) connectionStates';
   tcpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "tcp") connectionStates');
   udpConnectionStates = builtins.mapAttrs (k: v: k) (lib.filterAttrs (k: v: v.proto == "udp") connectionStates');
-in rec {
-  config.notnft = {
+
+  notnft = {
     inherit
       arpOps booleans byteUnits chainPolicies chainPriorities chainTypes connectionStates ctDirs ctKeys ctProtocols ctStates ctStatuses
       days dccpPktTypes dscpTypes ecnTypes etherTypes exists exthdrFields exthdrs
@@ -4157,9 +4157,16 @@ in rec {
     dccpPkttypes = dccpPktTypes;
     # "days" isn't very descriptive, so here's an alias
     weekDays = days;
-    dsl = import ./dsl.nix { inherit (config) notnft; inherit lib; };
-    inherit (import ./compile.nix { inherit (config) notnft; inherit lib; })
+    dsl = import ./dsl.nix { inherit notnft; inherit lib; };
+    inherit (import ./compile.nix { inherit notnft; inherit lib; })
       compileCmd compileExpr compileObject compileRuleset compileSetElem compileStmt compileStr;
+  };
+in rec {
+  config = {
+    _module.args = {
+      inherit notnft;
+    };
+    inherit notnft;
   };
   options.notnft = (builtins.mapAttrs (k: v: lib.mkOption { type = lib.types.unspecified; readOnly = true; }) config.notnft) // {
     enumMode = lib.mkOption {
