@@ -1962,12 +1962,10 @@ let
     };
     mangleStatement = submodule' {
       finalMerge = { key, value }@ret:
-        if key?exthdr || key?payload || key?meta || key?ct || key?"ct helper" then
-          assert lib.assertMsg
-            (isValidExpr CTX_F_MANGLE key && isValidExpr CTX_F_STMT value)
-            "Mangle statements' expressions are invalid in this context";
-          ret
-        else throw ''Key must be given as an "exthdr", "payload", "meta", "ct" or "ct helper" expression.'';
+        assert lib.assertMsg
+          (isValidExpr CTX_F_MANGLE key && isValidExpr CTX_F_STMT value)
+          "Mangle statement's expressions are invalid in this context";
+        ret;
 
       options.key = lib.mkOption {
         type = types.expression;
