@@ -42,7 +42,8 @@ changes upstream.
 - A: If you run `nft` with the `-j` flag, it allows you to load json
   rulesets. Also, you can quickly apply small commands via `nft -j
   '{"nftables":[ ...your rules here ]}'`. You can't currently do this
-  via `networking.nftables`.
+  via `networking.nftables`, but you can do it in
+  [nixos-router](https://github.com/chayleaf/nixos-router).
 - Q: How to use this in my config?
 - A: Add this flake's `nixosModules.default` output, and then either use
   `config.notnft` or the module argument `notnft`.
