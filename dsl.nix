@@ -496,7 +496,13 @@ self = rec {
     };
   };
   map = {
+    # map command
     __object__ = "map";
+    # map statement
+    add = map: elem: data: { map = { op = notnft.setOps.add; inherit map elem data; }; };
+    update = map: elem: data: { map = { op = notnft.setOps.update; inherit map elem data; }; };
+    delete = map: elem: data: { map = { op = notnft.setOps.delete; inherit map elem data; }; };
+    # map expr
     __functor = self: key: data: {
       map = {
         inherit key;

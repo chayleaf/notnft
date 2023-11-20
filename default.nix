@@ -1847,6 +1847,9 @@ let
         quotas = types.null;
         rule = types.ruleToWhatever;
         rules = types.null;
+        element = types.elementToWhatever;
+        set = types.setToWhatever;
+        map = types.mapToWhatever;
       };
     };
     flushCommand = oneOf' {
@@ -2156,6 +2159,34 @@ let
         type = types.statement;
       };
     };
+    mapStatement = submodule' {
+      finalMerge = ret:
+        assert lib.assertMsg
+          ((!ret?elem || isValidExpr CTX_F_SES ret.elem)
+          && (!ret?data || isValidExpr CTX_F_SES ret.data))
+          "Map statement's expression is invalid in this context";
+        ret;
+      options.op = lib.mkOption {
+        description = lib.mdDoc ''Operator on map, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
+        type = types.setOp;
+      };
+      options.elem = lib.mkOption {
+        description = "Map element to add or update.";
+        type = types.expression;
+      };
+      options.data = lib.mkOption {
+        description = "Map expression data.";
+        type = types.expression;
+      };
+      options.set = lib.mkOption {
+        description = "Map reference.";
+        type = types.setReference;
+      };
+      options.stmt = mkNullOption {
+        description = "Undocumented upstream";
+        type = types.statement;
+      };
+    };
     logStatement = submodule' {
       options.prefix = mkNullOption {
         description = "Prefix for log entries.";
@@ -2396,6 +2427,10 @@ let
         set = {
           type = types.setStatement;
           description = "Dynamically add/update elements to a set.";
+        };
+        map = {
+          type = types.mapStatement;
+          description = "Dynamically add/update elements to a map.";
         };
         log = {
           type = types.logStatement;
@@ -3398,6 +3433,7 @@ let
       daddr = ipv6_addr;
     };
     # documentation shows packet-too-big instead of mtu... but in the code and in the internal tests it's clearly mtu...
+    # TODO: add info about which icmpv6 types support which fields?
     icmpv6.fields = {
       type = icmpv6_type;
       code = icmpv6_code;
@@ -3407,6 +3443,8 @@ let
       id = integer 16;
       sequence = integer 16;
       max-delay = integer 16;
+      taddr = ipv6_addr;
+      daddr = ipv6_addr;
     };
     tcp.fields = {
       sport = inet_service;
@@ -3735,7 +3773,7 @@ let
     dstnat = {
       value = family: if family == "bridge" then -300 else -100;
       families = [ "ip" "ip6" "inet" "bridge" ];
-      hooks = [ "prerouting" ];
+      hooks = [ "output" "prerouting" ];
     };
     filter = {
       value = family: if family == "bridge" then -200 else 0;
@@ -3748,7 +3786,7 @@ let
     srcnat = {
       value = family: if family == "bridge" then 300 else 100;
       families = [ "ip" "ip6" "inet" "bridge" ];
-      hooks = [ "postrouting" ];
+      hooks = [ "input" "postrouting" ];
     };
     out = {
       value = family: 100;
