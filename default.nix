@@ -584,7 +584,7 @@ let
       } else {})
       // (if withExtraFields && isMap != false then builtins.mapAttrs mkOpt {
         map = {
-          type = types.type;
+          type = lib.types.either (lib.types.nonEmptyListOf types.type) types.type;
           description =
             if isMap == true then
               "Type of values this map maps to."
@@ -3433,7 +3433,6 @@ let
       daddr = ipv6_addr;
     };
     # documentation shows packet-too-big instead of mtu... but in the code and in the internal tests it's clearly mtu...
-    # TODO: add info about which icmpv6 types support which fields?
     icmpv6.fields = {
       type = icmpv6_type;
       code = icmpv6_code;
