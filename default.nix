@@ -30,12 +30,12 @@ let
       isValidCat = isValidExpr (builtins.bitOr CTX_F_CONCAT ctx);
     in
       if builtins.isInt expr || builtins.isString expr || builtins.isPath expr then true
-      else if builtins.isBool expr then (hasAllBits CTX_F_RHS ctx) != 0 || (hasAllBits CTX_F_PRIMARY ctx) != 0
+      else if builtins.isBool expr then hasAllBits CTX_F_RHS ctx != 0 || hasAllBits CTX_F_PRIMARY ctx != 0
       else if builtins.isList expr then (
         if hasAllBits CTX_F_PRIMARY ctx then false
         else if hasAllBits CTX_F_RHS ctx || hasAllBits CTX_F_STMT ctx then builtins.all isValid expr
         else false)
-      else if !(builtins.isAttrs expr) then false
+      else if !builtins.isAttrs expr then false
       else if builtins.length (builtins.attrNames expr) != 1 then false
       # extracted from src/parser_json.c
       else let
@@ -89,10 +89,12 @@ let
           prefix = { addr, ... }: isValidPrim addr;
           range = builtins.all isValidPrim;
           set = expr:
-            if builtins.isList expr then builtins.all (elem:
-              if builtins.isList elem && builtins.length elem == 2
-              then isValidRhs (builtins.head elem) && isValidSetRhs (builtins.head (builtins.tail elem))
-              else isValidRhs elem) expr
+            if builtins.isList expr then builtins.all
+              (elem:
+                if builtins.isList elem && builtins.length elem == 2
+                then isValidRhs (builtins.head elem) && isValidSetRhs (builtins.head (builtins.tail elem))
+                else isValidRhs elem)
+              expr
             else isImmediateExpr expr;
           map = { key, data }: isValidLhs key && isValidRhs data;
           elem = { val, ... }: isValidExpr val;
@@ -105,7 +107,7 @@ let
   # warning: this may not yet be merged
   innerExprs = expr:
     if builtins.isList expr then expr
-    else if !(builtins.isAttrs expr) then []
+    else if !builtins.isAttrs expr then []
     else if builtins.length (builtins.attrNames expr) != 1 then []
     else if expr?map.key && expr?map.data then [ expr.map.key expr.map.data ]
     else if expr?range.min && expr?range.max then [ expr.range.min expr.range.max ]
@@ -127,7 +129,7 @@ let
   # warning: this may not yet be merged
   exprEnums = expr:
     (if builtins.isList expr then builtins.concatMap exprEnums expr
-    else if !(builtins.isAttrs expr) then []
+    else if !builtins.isAttrs expr then []
     else if expr?__expr__ then exprEnums expr.__expr__
     else if expr?__enumName__ && nftTypes?${expr.__enumName__}.enum then [ nftTypes.${expr.__enumName__}.enum ]
     else if builtins.length (builtins.attrNames expr) != 1 then []
@@ -138,30 +140,35 @@ let
       # range = exprEnum val;
       payload =
         if val?base then [ ]
-        else if !(isStringLike (val.protocol or null)) then [ ]
-        else if !(isStringLike (val.field or null)) then [ booleans ]
-        else if (payloadProtocols?${toString val.protocol}.fields.${toString val.field}.enum) then [ payloadProtocols.${toString val.protocol}.fields.${toString val.field}.enum ]
+        else if !isStringLike (val.protocol or null) then [ ]
+        else if !isStringLike (val.field or null) then [ booleans ]
+        else if payloadProtocols?${toString val.protocol}.fields.${toString val.field}.enum
+        then [ payloadProtocols.${toString val.protocol}.fields.${toString val.field}.enum ]
         else [ ];
       exthdr =
-        if !(isStringLike (val.name or null)) then [ ]
-        else if !(isStringLike (val.field or null)) then [ booleans ]
-        else if exthdrs?${toString val.name}.fields.${toString val.field}.enum then [ exthdrs.${toString val.name}.fields.${toString val.field}.enum ]
+        if !isStringLike (val.name or null) then [ ]
+        else if !isStringLike (val.field or null) then [ booleans ]
+        else if exthdrs?${toString val.name}.fields.${toString val.field}.enum
+        then [ exthdrs.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "tcp option" =
         if val?base then []
-        else if !(isStringLike (val.name or null)) then [ ]
-        else if !(isStringLike (val.field or null)) then [ booleans ]
-        else if tcpOptions?${toString val.name}.fields.${toString val.field}.enum then [ tcpOptions.${toString val.name}.fields.${toString val.field}.enum ]
+        else if !isStringLike (val.name or null) then [ ]
+        else if !isStringLike (val.field or null) then [ booleans ]
+        else if tcpOptions?${toString val.name}.fields.${toString val.field}.enum
+        then [ tcpOptions.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "ip option" =
-        if !(isStringLike (val.name or null)) then [ ]
-        else if !(isStringLike (val.field or null)) then [ booleans ]
-        else if ipOptions?${toString val.name}.fields.${toString val.field}.enum then [ ipOptions.${toString val.name}.fields.${toString val.field}.enum ]
+        if !isStringLike (val.name or null) then [ ]
+        else if !isStringLike (val.field or null) then [ booleans ]
+        else if ipOptions?${toString val.name}.fields.${toString val.field}.enum
+        then [ ipOptions.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       "sctp chunk" =
-        if !(isStringLike (val.name or null)) then [ ]
-        else if !(isStringLike (val.field or null)) then [ booleans ]
-        else if sctpChunks?${toString val.name}.fields.${toString val.field}.enum then [ sctpChunks.${toString val.name}.fields.${toString val.field}.enum ]
+        if !isStringLike (val.name or null) then [ ]
+        else if !isStringLike (val.field or null) then [ booleans ]
+        else if sctpChunks?${toString val.name}.fields.${toString val.field}.enum
+        then [ sctpChunks.${toString val.name}.fields.${toString val.field}.enum ]
         else [ ];
       meta =
         if isStringLike (val.key or null) && metaKeys?${toString val.key}.type.enum then [ metaKeys.${toString val.key}.type.enum ]
@@ -431,17 +438,17 @@ let
           type = lib.types.str;
           description = "The table’s name.";
         };
-      } // (if withHandle then builtins.mapAttrs mkOpt {
+      } // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The table’s handle. In input, it is used only in **delete** command as alternative to **name**.";
         };
-      } else { }) // (if withExtraFields then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         comment = {
           type = lib.types.str;
           description = "Undocumented upstream";
         };
-      } else { });
+      });
     };
     mkChainType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withNewName ? false, withExtraFields ? false }:
     let
@@ -463,7 +470,7 @@ let
           description = "The chain's name.";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         type = {
           type = types.chainType;
           description = "The chain’s type.";
@@ -488,18 +495,18 @@ let
           type = lib.types.str;
           description = "Undocumented upstream";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The chain’s handle. In input, it is used only in **delete** command as alternative to **name**.";
         };
-      } else {})
-      // (if withNewName then builtins.mapAttrs mkOpt {
+      })
+      // lib.optionalAttrs withNewName (builtins.mapAttrs mkOpt {
         newname = {
           type = lib.types.str;
           description = lib.mdDoc "A new name for the chain, only relevant in the **rename** command.";
         };
-      } else {});
+      });
     };
     mkRuleType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withIndex ? false, withExpr ? false, withComment ? false }:
     let
@@ -521,30 +528,30 @@ let
           description = "The chain's name.";
         };
       }
-      // (if withExpr then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExpr (builtins.mapAttrs mkOpt {
         expr = {
           type = lib.types.listOf types.statement;
           description = lib.mdDoc "An array of statements this rule consists of. In input, it is used in **add**/**insert**/**replace** commands only.";
         };
-      } else {})
-      // (if withHandle then builtins.mapAttrs mkOpt {
+      })
+      // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The rule’s handle. In **delete**/**replace** commands, it serves as an identifier of the rule to delete/replace. In **add**/**insert** commands, it serves as an identifier of an existing rule to append/prepend the rule to.";
         };
-      } else {})
-      // (if withIndex then builtins.mapAttrs mkOpt {
+      })
+      // lib.optionalAttrs withIndex (builtins.mapAttrs mkOpt {
         index = {
           type = lib.types.ints.unsigned;
           description = lib.mdDoc "The rule’s position for add/insert commands. It is used as an alternative to handle then.";
         };
-      } else {})
-      // (if withComment then builtins.mapAttrs mkOpt {
+      })
+      // lib.optionalAttrs withComment (builtins.mapAttrs mkOpt {
         comment = {
           type = lib.types.str;
           description = "Optional rule comment.";
         };
-      } else {});
+      });
     };
     mkSetType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false, isMap ? null }:
     let
@@ -555,10 +562,13 @@ let
       finalMerge = ret:
         if ret?elem then
           let expr = ret.elem; in assert lib.assertMsg
-            (if builtins.isList expr then builtins.all (elem:
-              if builtins.isList elem && builtins.length elem == 2
-              then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
-              else isValidExpr CTX_F_RHS elem) expr
+            (if builtins.isList expr then
+              builtins.all
+                (elem:
+                  if builtins.isList elem && builtins.length elem == 2
+                  then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
+                  else isValidExpr CTX_F_RHS elem)
+                expr
             else isImmediateExpr expr)
             "Set/map add command's exprs are invalid in this context";
           finalMerge ret
@@ -576,13 +586,13 @@ let
           type = lib.types.str;
           description = "The ${name}'s name.";
         };
-      } // (if withExtraFields then builtins.mapAttrs mkOpt {
+      } // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         type = {
           type = lib.types.either (lib.types.nonEmptyListOf types.keyType) types.keyType;
           description = ''The ${name}’s datatype - might be a string, such as "ipv4_addr" or an array consisting of strings (for concatenated types).'';
         };
-      } else {})
-      // (if withExtraFields && isMap != false then builtins.mapAttrs mkOpt {
+      })
+      // lib.optionalAttrs (withExtraFields && isMap != false) (builtins.mapAttrs mkOpt {
         map = {
           type = lib.types.either (lib.types.nonEmptyListOf types.type) types.type;
           description =
@@ -591,7 +601,7 @@ let
             else
               "Type of values this set maps to (i.e. this set is a map).";
         };
-      } else {}) // (if withExtraFields then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         policy = {
           type = types.setPolicy;
           description = "The ${name}’s policy.";
@@ -622,12 +632,12 @@ let
           type = lib.types.listOf types.statement;
           description = "Undocumented upstream";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The set’s handle. For input, it is used in the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkElementType = { finalMerge ? lib.id, reqFields ? [], withElem ? false, isMap ? null }:
     let
@@ -638,10 +648,13 @@ let
       finalMerge = ret:
         if ret?elem then
           let expr = ret.elem; in assert lib.assertMsg
-            (if builtins.isList expr then builtins.all (elem:
-              if builtins.isList elem && builtins.length elem == 2
-              then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
-              else isValidExpr CTX_F_RHS elem) expr
+          (if builtins.isList expr then
+            builtins.all
+              (elem:
+                if builtins.isList elem && builtins.length elem == 2
+                then isValidExpr CTX_F_RHS (builtins.head elem) && isValidExpr CTX_F_SET_RHS (builtins.head (builtins.tail elem))
+                else isValidExpr CTX_F_RHS elem)
+              expr
             else isImmediateExpr expr)
             "Element add command's exprs are invalid in this context";
           finalMerge ret
@@ -659,14 +672,14 @@ let
           type = if isMap == true then types.mapName else types.setName;
           description = "The ${name}’s name.";
         };
-      } // (if withElem then builtins.mapAttrs mkOpt {
+      } // lib.optionalAttrs withElem (builtins.mapAttrs mkOpt {
         elem = {
           type =
             if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
             else lib.types.nonEmptyListOf types.expression;
           description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
         };
-      } else {});
+      });
     };
     mkFlowtableType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -688,7 +701,7 @@ let
           description = "The flowtable's name.";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         hook = {
           type = types.hook;
           description = "The flowtable’s hook.";
@@ -701,12 +714,12 @@ let
           type = lib.types.either (lib.types.nonEmptyListOf lib.types.str) lib.types.str;
           description = "The flowtable’s interface(s).";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The flowtable’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkCounterType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -728,7 +741,7 @@ let
           description = "The counter's name.";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         packets = {
           type = lib.types.ints.unsigned;
           description = "Packet counter value.";
@@ -741,12 +754,12 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The counter’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkQuotaType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -768,7 +781,7 @@ let
           description = "The quota's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         bytes = {
           type = lib.types.ints.unsigned;
           description = "Quota threshold.";
@@ -786,12 +799,12 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The quota’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkSecmarkType = { finalMerge ? lib.id, reqFields ? [], withExtraFields ? false }:
     let
@@ -845,7 +858,7 @@ let
           description = "The ct helper's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         type = {
           type = lib.types.str;
           description = lib.mdDoc ''The ct helper type name, e.g. **"ftp"** or **"tftp"**.'';
@@ -862,7 +875,7 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {});
+      });
     };
     mkLimitType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -884,7 +897,7 @@ let
           description = "The limit's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         rate = {
           type = lib.types.ints.unsigned;
           description = "The limit’s rate value.";
@@ -918,12 +931,12 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The limit’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkCtTimeoutType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -945,7 +958,7 @@ let
           description = "The ct timeout object's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         protocol = {
           type = types.ctProto;
           description = "The ct timeout object’s layer 4 protocol.";
@@ -962,12 +975,12 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The ct timeout object’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkCtExpectationType = { finalMerge ? lib.id, reqFields ? [], withHandle ? false, withExtraFields ? false }:
     let
@@ -989,7 +1002,7 @@ let
           description = "The ct expectation object's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         l3proto = {
           type = types.l3Proto;
           description = lib.mdDoc ''The ct expectation object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
@@ -1014,12 +1027,12 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {}) // (if withHandle then builtins.mapAttrs mkOpt {
+      }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
           description = lib.mdDoc "The ct expectation object’s handle. In input, it is used by the **delete** command only.";
         };
-      } else {});
+      });
     };
     mkSynproxyType = { finalMerge ? lib.id, reqFields ? [], withExtraFields ? false }:
     let
@@ -1041,7 +1054,7 @@ let
           description = "The synproxy's name";
         };
       }
-      // (if withExtraFields then builtins.mapAttrs mkOpt {
+      // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         mss = {
           type = lib.types.ints.u16;
           description = "Maximum segment size announced to clients.";
@@ -1058,7 +1071,7 @@ let
           type = lib.types.str;
           description = "Optional comment.";
         };
-      } else {});
+      });
     };
   in {
     inherit submodule' submoduleWith' submoduleSK oneOf';
@@ -1184,8 +1197,8 @@ let
       check =
         x:
         builtins.isInt x
-        || (if strictEnums then builtins.elem x (builtins.attrValues flowtablePriorities)
-            else builtins.elem x (builtins.attrNames flowtablePriorities) || builtins.elem x (builtins.attrValues flowtablePriorities));
+        || builtins.elem x (builtins.attrValues flowtablePriorities)
+        || (!strictEnums && builtins.elem x (builtins.attrNames flowtablePriorities));
       merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
         value = if builtins.isInt def.value then def.value else flowtablePriorities.${toString def.value}.value;
       }) defs);
@@ -1197,8 +1210,8 @@ let
       check =
         x:
         builtins.isInt x
-        || (if strictEnums then builtins.elem x (builtins.attrValues chainPriorities)
-            else builtins.elem x (builtins.attrNames chainPriorities) || builtins.elem x (builtins.attrValues chainPriorities));
+        || builtins.elem x (builtins.attrValues chainPriorities)
+        || (!strictEnums && builtins.elem x (builtins.attrNames chainPriorities));
       merge = loc: defs: lib.mergeOneOption loc (map (def: def // {
         value = if builtins.isInt def.value then def.value else toString def.value;
       }) defs);
@@ -1406,29 +1419,29 @@ let
             && builtins.any (k: !x?${k}) reqBase'
           then
             throw "Base chains ${
-              if x.family or "" == "netdev" then "in the netdev family " else ""
+              lib.optionalString (x.family or "" == "netdev") "in the netdev family "
             }must have fields ${builtins.concatStringsSep ", " (map (s: "`${s}`") reqBase')} set"
           else if x.family or "" != "netdev" && x?dev then
             throw "I'm not sure about this, but I think non-netdev family chains can't have a device specified, check your code or open an issue!"
-          else if x?family && info.families or null != null && !(builtins.elem x.family info.families) then
+          else if x?family && info.families or null != null && !builtins.elem x.family info.families then
             throw "Chains of type ${x.type} can only be in families ${builtins.concatStringsSep ", " info.families}"
-          else if x?hook && info.hooks or null != null && !(builtins.elem x.hook info.hooks) then
+          else if x?hook && info.hooks or null != null && !builtins.elem x.hook info.hooks then
             throw "Chains of type ${x.type} can only be in hooks ${builtins.concatStringsSep ", " info.hooks}"
-          else if x?hook && familyInfo.hooks or null != null && !(builtins.elem x.hook familyInfo.hooks) then
+          else if x?hook && familyInfo.hooks or null != null && !builtins.elem x.hook familyInfo.hooks then
             throw "Chains of family ${x.family} can only be in hooks ${builtins.concatStringsSep ", " familyInfo.hooks}"
           else
-            x // (if builtins.isString (x.prio or null) then
-              let
+            x // lib.optionalAttrs
+              (builtins.isString (x.prio or null))
+              (let
                 prioInfo = chainPriorities.${x.prio};
               in
-                (if x?family && prioInfo.families or null != null && !(builtins.elem x.family prioInfo.families) then
+                (if x?family && prioInfo.families or null != null && !builtins.elem x.family prioInfo.families then
                   throw "Priority ${x.prio} can only be used in families ${builtins.concatStringsSep ", " prioInfo.families}"
-                else if x?hook && prioInfo.hooks or null != null && !(builtins.elem x.hook prioInfo.hooks) then
+                else if x?hook && prioInfo.hooks or null != null && !builtins.elem x.hook prioInfo.hooks then
                   throw "Priority ${x.prio} can only be used in hooks ${builtins.concatStringsSep ", " prioInfo.hooks}"
                 else {
                   prio = prioInfo.value (x.family or "");
-                })
-            else {});
+                }));
       reqFields = [ "family" "table" "name" ];
       withExtraFields = true;
     };
@@ -3034,15 +3047,15 @@ let
     ipv6_addr.description = "IPv6 address";
     ipv6_addr.check = x: let
       spl = builtins.split "::" x;
-      chk = if !(builtins.isString x) then 999 else let spl = builtins.split ":" x; in
-        if (builtins.length spl) / 2 * 2 != builtins.length spl && builtins.all lib.id (lib.imap0 (i: x:
+      chk = if !builtins.isString x then 999 else let spl = builtins.split ":" x; in
+        if builtins.length spl / 2 * 2 != builtins.length spl && builtins.all lib.id (lib.imap0 (i: x:
           if i / 2 * 2 == i
           then builtins.isString x && builtins.match "[0-9a-f]?[0-9a-f]?[0-9a-f]?[0-9a-f]" x
           else x == []) spl)
         then (builtins.length spl + 1) / 2 else 999;
     in
       if builtins.length spl == 1 then chk x == 8
-      else builtins.length spl == 3 && builtins.elemAt spl 1 == [] && (chk (builtins.head spl)) + (chk (lib.last spl)) < 8;
+      else builtins.length spl == 3 && builtins.elemAt spl 1 == [] && chk (builtins.head spl) + chk (lib.last spl) < 8;
     ether_addr.bits = 48;
     ether_addr.description = "Ethernet address";
     ether_addr.check = x:
