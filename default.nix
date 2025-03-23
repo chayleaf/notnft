@@ -432,7 +432,7 @@ let
       options = builtins.mapAttrs mkOpt {
         family = {
           type = types.family;
-          description = lib.mdDoc ''The table’s family, e.g. **"ip"** or **"ip6"**.'';
+          description = ''The table’s family, e.g. **"ip"** or **"ip6"**.'';
         };
         name = {
           type = lib.types.str;
@@ -441,7 +441,7 @@ let
       } // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The table’s handle. In input, it is used only in **delete** command as alternative to **name**.";
+          description = "The table’s handle. In input, it is used only in **delete** command as alternative to **name**.";
         };
       }) // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         comment = {
@@ -498,13 +498,13 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The chain’s handle. In input, it is used only in **delete** command as alternative to **name**.";
+          description = "The chain’s handle. In input, it is used only in **delete** command as alternative to **name**.";
         };
       })
       // lib.optionalAttrs withNewName (builtins.mapAttrs mkOpt {
         newname = {
           type = lib.types.str;
-          description = lib.mdDoc "A new name for the chain, only relevant in the **rename** command.";
+          description = "A new name for the chain, only relevant in the **rename** command.";
         };
       });
     };
@@ -531,19 +531,19 @@ let
       // lib.optionalAttrs withExpr (builtins.mapAttrs mkOpt {
         expr = {
           type = lib.types.listOf types.statement;
-          description = lib.mdDoc "An array of statements this rule consists of. In input, it is used in **add**/**insert**/**replace** commands only.";
+          description = "An array of statements this rule consists of. In input, it is used in **add**/**insert**/**replace** commands only.";
         };
       })
       // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The rule’s handle. In **delete**/**replace** commands, it serves as an identifier of the rule to delete/replace. In **add**/**insert** commands, it serves as an identifier of an existing rule to append/prepend the rule to.";
+          description = "The rule’s handle. In **delete**/**replace** commands, it serves as an identifier of the rule to delete/replace. In **add**/**insert** commands, it serves as an identifier of an existing rule to append/prepend the rule to.";
         };
       })
       // lib.optionalAttrs withIndex (builtins.mapAttrs mkOpt {
         index = {
           type = lib.types.ints.unsigned;
-          description = lib.mdDoc "The rule’s position for add/insert commands. It is used as an alternative to handle then.";
+          description = "The rule’s position for add/insert commands. It is used as an alternative to handle then.";
         };
       })
       // lib.optionalAttrs withComment (builtins.mapAttrs mkOpt {
@@ -614,7 +614,7 @@ let
           type =
             if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
             else lib.types.nonEmptyListOf types.expression;
-          description = lib.mdDoc ("Initial ${name} element(s)." + (lib.optionalString (isMap != false) " For mappings, an array of arrays with exactly two elements is expected."));
+          description = ("Initial ${name} element(s)." + (lib.optionalString (isMap != false) " For mappings, an array of arrays with exactly two elements is expected."));
         };
         timeout = {
           type = lib.types.ints.unsigned;
@@ -635,7 +635,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The set’s handle. For input, it is used in the **delete** command only.";
+          description = "The set’s handle. For input, it is used in the **delete** command only.";
         };
       });
     };
@@ -662,7 +662,7 @@ let
       options = builtins.mapAttrs mkOpt {
         family = {
           type = types.family;
-          description = lib.mdDoc ''The table’s family, e.g. **"ip"** or **"ip6"**.'';
+          description = ''The table’s family, e.g. **"ip"** or **"ip6"**.'';
         };
         table = {
           type = types.tableName;
@@ -677,7 +677,7 @@ let
           type =
             if isMap == true then lib.types.nonEmptyListOf (types.listOfSize2 types.expression)
             else lib.types.nonEmptyListOf types.expression;
-          description = lib.mdDoc ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
+          description = ("Elements to add to the ${name}." + (lib.optionalString (isMap != false) " Use `[ key val ]` to specify a map element."));
         };
       });
     };
@@ -717,7 +717,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The flowtable’s handle. In input, it is used by the **delete** command only.";
+          description = "The flowtable’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -757,7 +757,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The counter’s handle. In input, it is used by the **delete** command only.";
+          description = "The counter’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -802,7 +802,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The quota’s handle. In input, it is used by the **delete** command only.";
+          description = "The quota’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -861,7 +861,7 @@ let
       // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         type = {
           type = lib.types.str;
-          description = lib.mdDoc ''The ct helper type name, e.g. **"ftp"** or **"tftp"**.'';
+          description = ''The ct helper type name, e.g. **"ftp"** or **"tftp"**.'';
         };
         protocol = {
           type = types.ctProto;
@@ -869,7 +869,7 @@ let
         };
         l3proto = {
           type = types.l3Proto;
-          description = lib.mdDoc ''The ct helper's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
+          description = ''The ct helper's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
         comment = {
           type = lib.types.str;
@@ -904,27 +904,27 @@ let
         };
         per = {
           type = types.timeUnit;
-          description = lib.mdDoc ''Time unit to apply the limit to, e.g. **"week"**, **"day"**, **"hour"**, etc. If omitted, defaults to **"second"**.'';
+          description = ''Time unit to apply the limit to, e.g. **"week"**, **"day"**, **"hour"**, etc. If omitted, defaults to **"second"**.'';
           defaultText = lib.literalExpression "second";
         };
         rate_unit = {
           type = types.rateUnit;
-          description = lib.mdDoc ''Unit of rate values. If omitted, defaults to **"packets"**.'';
+          description = ''Unit of rate values. If omitted, defaults to **"packets"**.'';
           defaultText = lib.literalExpression "packets";
         };
         burst = {
           type = lib.types.ints.u32;
-          description = lib.mdDoc "The limit’s burst value. If omitted, defaults to **0**.";
+          description = "The limit’s burst value. If omitted, defaults to **0**.";
           defaultText = lib.literalExpression 0;
         };
         burst_unit = {
           type = types.rateUnit;
-          description = lib.mdDoc ''Unit of burst values. If omitted, defaults to **"bytes"**. Has no effect if `rate_unit` is set to **"packets"**.'';
+          description = ''Unit of burst values. If omitted, defaults to **"bytes"**. Has no effect if `rate_unit` is set to **"packets"**.'';
           defaultText = lib.literalExpression "packets";
         };
         inv = {
           type = lib.types.bool;
-          description = lib.mdDoc "If true, match if limit was exceeded. If omitted, defaults to **false**.";
+          description = "If true, match if limit was exceeded. If omitted, defaults to **false**.";
           defaultText = lib.literalExpression false;
         };
         comment = {
@@ -934,7 +934,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The limit’s handle. In input, it is used by the **delete** command only.";
+          description = "The limit’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -965,7 +965,7 @@ let
         };
         l3proto = {
           type = types.l3Proto;
-          description = lib.mdDoc ''The ct timeout object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
+          description = ''The ct timeout object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
         policy = {
           type = lib.types.attrsOf lib.types.ints.u32;
@@ -978,7 +978,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The ct timeout object’s handle. In input, it is used by the **delete** command only.";
+          description = "The ct timeout object’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -1005,7 +1005,7 @@ let
       // lib.optionalAttrs withExtraFields (builtins.mapAttrs mkOpt {
         l3proto = {
           type = types.l3Proto;
-          description = lib.mdDoc ''The ct expectation object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
+          description = ''The ct expectation object's layer 3 protocol, e.g. **"ip"** or **"ip6"**.'';
         };
         protocol = {
           type = types.ctProto;
@@ -1030,7 +1030,7 @@ let
       }) // lib.optionalAttrs withHandle (builtins.mapAttrs mkOpt {
         handle = {
           type = lib.types.int;
-          description = lib.mdDoc "The ct expectation object’s handle. In input, it is used by the **delete** command only.";
+          description = "The ct expectation object’s handle. In input, it is used by the **delete** command only.";
         };
       });
     };
@@ -1905,19 +1905,19 @@ let
         };
         replace = {
           type = types.replaceCommand;
-          description = lib.mdDoc "Replace a rule. In rule, the **handle** property is mandatory and identifies the rule to be replaced.";
+          description = "Replace a rule. In rule, the **handle** property is mandatory and identifies the rule to be replaced.";
         };
         create = {
           type = types.createCommand;
-          description = lib.mdDoc "Identical to **add** command, but returns an error if the object already exists.";
+          description = "Identical to **add** command, but returns an error if the object already exists.";
         };
         insert = {
           type = types.insertCommand ;
-          description = lib.mdDoc "This command is identical to **add** for rules, but instead of appending the rule to the chain by default, it inserts at first position. If a **handle** or **index** property is given, the rule is inserted before the rule identified by those properties.";
+          description = "This command is identical to **add** for rules, but instead of appending the rule to the chain by default, it inserts at first position. If a **handle** or **index** property is given, the rule is inserted before the rule identified by those properties.";
         };
         delete = {
           type = types.deleteCommand;
-          description = lib.mdDoc "Delete an object from the ruleset. Only the minimal number of properties required to uniquely identify an object is generally needed in *ADD_OBJECT*. For most ruleset elements, this is **family** and **table** plus either **handle** or **name** (except rules since they don’t have a name).";
+          description = "Delete an object from the ruleset. Only the minimal number of properties required to uniquely identify an object is generally needed in *ADD_OBJECT*. For most ruleset elements, this is **family** and **table** plus either **handle** or **name** (except rules since they don’t have a name).";
         };
         destroy = {
           type = types.destroyCommand;
@@ -1925,7 +1925,7 @@ let
         };
         list = {
           type = types.listCommand;
-          description = lib.mdDoc "List ruleset elements. The plural forms are used to list all objects of that kind, optionally filtered by **family** and for some, also **table**.";
+          description = "List ruleset elements. The plural forms are used to list all objects of that kind, optionally filtered by **family** and for some, also **table**.";
         };
         reset = {
           type = types.resetCommand;
@@ -1933,11 +1933,11 @@ let
         };
         flush = {
           type = types.flushCommand;
-          description = lib.mdDoc "Empty contents in given object, e.g. remove all chains from given **table** or remove all elements from given **set**.";
+          description = "Empty contents in given object, e.g. remove all chains from given **table** or remove all elements from given **set**.";
         };
         rename = {
           type = types.renameCommand;
-          description = lib.mdDoc "Rename a chain. The new name is expected in a dedicated property named **newname**.";
+          description = "Rename a chain. The new name is expected in a dedicated property named **newname**.";
         };
       };
     };
@@ -1985,7 +1985,7 @@ let
 
       options.key = lib.mkOption {
         type = types.expression;
-        description = lib.mdDoc "The packet data to be changed, given as an **exthdr**, **payload**, **meta**, **ct** or **ct helper** expression.";
+        description = "The packet data to be changed, given as an **exthdr**, **payload**, **meta**, **ct** or **ct helper** expression.";
       };
       options.value = lib.mkOption {
         type = types.expression;
@@ -2000,7 +2000,7 @@ let
       };
       options.val_unit = lib.mkOption {
         type = types.byteUnit;
-        description = lib.mdDoc ''Unit of **val**, e.g. **"kbytes"** or **"mbytes"**. If omitted, defaults to **"bytes"**.'';
+        description = ''Unit of **val**, e.g. **"kbytes"** or **"mbytes"**. If omitted, defaults to **"bytes"**.'';
         defaultText = lib.literalExpression "bytes";
       };
       options.used = mkNullOption {
@@ -2009,12 +2009,12 @@ let
       };
       options.used_unit = mkNullOption {
         type = types.byteUnit;
-        description = lib.mdDoc ''Unit of **used**. Defaults to **"bytes"**.'';
+        description = ''Unit of **used**. Defaults to **"bytes"**.'';
         defaultText = lib.literalExpression "bytes";
       };
       options.inv = mkNullOption {
         type = lib.types.bool;
-        description = lib.mdDoc "If **true**, will match if the quota has been exceeded. Defaults to **false**.";
+        description = "If **true**, will match if the quota has been exceeded. Defaults to **false**.";
         defaultText = lib.literalExpression false;
       };
     };
@@ -2026,26 +2026,26 @@ let
       };
       options.rate_unit = mkNullOption {
         type = types.rateUnit;
-        description = lib.mdDoc ''Unit of **rate**, e.g. **"packets"** or **"mbytes"**. Defaults to **"packets"**.'';
+        description = ''Unit of **rate**, e.g. **"packets"** or **"mbytes"**. Defaults to **"packets"**.'';
         defaultText = lib.literalExpression "packets";
       };
       options.per = lib.mkOption {
         type = types.timeUnit;
-        description = lib.mdDoc ''Denominator of rate, e.g. **"week"** or **"minutes"**.'';
+        description = ''Denominator of rate, e.g. **"week"** or **"minutes"**.'';
       };
       options.burst = mkNullOption {
         type = lib.types.ints.u32;
-        description = lib.mdDoc "Burst value. Defaults to **0**.";
+        description = "Burst value. Defaults to **0**.";
         defaultText = lib.literalExpression 0;
       };
       options.burst_unit = mkNullOption {
         type = types.byteUnit;
-        description = lib.mdDoc ''Unit of burst, ignored if rate_unit is **"packets"**. Defaults to **"bytes"**.'';
+        description = ''Unit of burst, ignored if rate_unit is **"packets"**. Defaults to **"bytes"**.'';
         defaultText = lib.literalExpression "bytes";
       };
       options.inv = mkNullOption {
         type = lib.types.bool;
-        description = lib.mdDoc "If **true**, matches if the limit was exceeded. Defaults to **false**.";
+        description = "If **true**, matches if the limit was exceeded. Defaults to **false**.";
         defaultText = lib.literalExpression false;
       };
     };
@@ -2062,7 +2062,7 @@ let
       };
       options.family = mkNullOption {
         type = types.ipFamily;
-        description = lib.mdDoc "Family of **addr**.";
+        description = "Family of **addr**.";
       };
       options.addr = mkNullOption {
         type = types.expression;
@@ -2142,7 +2142,7 @@ let
         ret;
       options.type = mkNullOption {
         type = types.rejectType;
-        description = lib.mdDoc ''Type of reject, either **"tcp reset"**, **"icmpx"**, **"icmp"** or **"icmpv6"**.'';
+        description = ''Type of reject, either **"tcp reset"**, **"icmpx"**, **"icmp"** or **"icmpv6"**.'';
       };
       options.expr = mkNullOption {
         type = types.expression;
@@ -2156,7 +2156,7 @@ let
           "Set statement's expression is invalid in this context";
         ret;
       options.op = lib.mkOption {
-        description = lib.mdDoc ''Operator on set, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
+        description = ''Operator on set, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
         type = types.setOp;
       };
       options.elem = lib.mkOption {
@@ -2180,7 +2180,7 @@ let
           "Map statement's expression is invalid in this context";
         ret;
       options.op = lib.mkOption {
-        description = lib.mdDoc ''Operator on map, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
+        description = ''Operator on map, either **"add"** or **"update"**. Undocumented upstream: **"delete"**'';
         type = types.setOp;
       };
       options.elem = lib.mkOption {
@@ -2218,7 +2218,7 @@ let
         type = lib.types.ints.u16;
       };
       options.level = mkNullOption {
-        description = lib.mdDoc ''Log level. Defaults to **"warn"**.'';
+        description = ''Log level. Defaults to **"warn"**.'';
         type = types.logLevel;
         defaultText = lib.literalExpression "warn";
       };
@@ -2284,7 +2284,7 @@ let
       };
       options.inv = mkNullOption {
         type = lib.types.bool;
-        description = lib.mdDoc "If **true**, match if **val** was exceeded. If omitted, defaults to **false**.";
+        description = "If **true**, match if **val** was exceeded. If omitted, defaults to **false**.";
         defaultText = lib.literalExpression false;
       };
     };
@@ -2371,11 +2371,11 @@ let
         };
         goto = {
           type = types.gotoStatement;
-          description = lib.mdDoc "Similar to **jump**, but the current position is not pushed to the call stack.";
+          description = "Similar to **jump**, but the current position is not pushed to the call stack.";
         };
         match = {
           type = types.matchStatement;
-          description = lib.mdDoc ''
+          description = ''
             Unlike with the standard API, the operator is mandatory here. In the standard API, a missing operator may be resolved in two ways, depending on the type of expression on the RHS:
 
             - If the RHS is a bitmask or a list of bitmasks, the expression resolves into a binary operation with the inequality operator, like this: LHS & RHS != 0.
@@ -2386,7 +2386,7 @@ let
         };
         counter = {
           type = lib.types.nullOr (lib.types.either types.counterStatement (types.expression' { chk = isValidExpr CTX_F_STMT; }));
-          description = lib.mdDoc ''
+          description = ''
             This object represents a byte/packet counter. In input, no properties are required. If given, they act as initial values for the counter.
 
             The first form creates an anonymous counter which lives in the rule it appears in. The second form specifies a reference to a named counter object.
@@ -2479,7 +2479,7 @@ let
         };
         xt = {
           type = types.xtStatement;
-          description = lib.mdDoc ''
+          description = ''
             This represents an xt statement from xtables compat interface. It is a fallback if translation is not available or not complete.
 
             Seeing this means the ruleset (or parts of it) were created by **iptables-nft** and one should use that to manage it.
@@ -2582,11 +2582,11 @@ let
         type = types.exthdr;
       };
       options.field = mkNullOption {
-        description = lib.mdDoc "Field name. If this property is not given, the expression is to be used as a header existence check in a **match** statement with a boolean on the right hand side.";
+        description = "Field name. If this property is not given, the expression is to be used as a header existence check in a **match** statement with a boolean on the right hand side.";
         type = types.exthdrField;
       };
       options.offset = mkNullOption {
-        description = lib.mdDoc "Field **offset** (used only for **rt0** protocol).";
+        description = "Field **offset** (used only for **rt0** protocol).";
         type = lib.types.ints.u16;
       };
     };
@@ -2616,7 +2616,7 @@ let
         type = types.tcpOption;
       };
       options.field = mkNullOption {
-        description = lib.mdDoc "TCP option field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
+        description = "TCP option field. If this property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.";
         type = types.tcpOptionField;
       };
     };
@@ -2636,7 +2636,7 @@ let
         type = types.ipOption;
       };
       options.field = mkNullOption {
-        description = lib.mdDoc "IP option header field. If this property is not given, the expression is to be used as an IP option existence check in a **match** statement with a boolean on the right hand side.";
+        description = "IP option header field. If this property is not given, the expression is to be used as an IP option existence check in a **match** statement with a boolean on the right hand side.";
         type = types.ipOptionField;
       };
     };
@@ -2651,7 +2651,7 @@ let
         type = types.sctpChunk;
       };
       options.field = mkNullOption {
-        description = lib.mdDoc "SCTP chunk field. If this property is not given, the expression is to be used as an SCTP chunk existence check in a **match** statement with a boolean on the right hand side.";
+        description = "SCTP chunk field. If this property is not given, the expression is to be used as an SCTP chunk existence check in a **match** statement with a boolean on the right hand side.";
         type = types.sctpChunkField;
       };
     };
@@ -2692,7 +2692,7 @@ let
         type = types.ipFamily;
       };
       options.dir = mkNullOption {
-        description = lib.mdDoc "Some CT keys do not support a direction. In this case, **dir** must not be given.";
+        description = "Some CT keys do not support a direction. In this case, **dir** must not be given.";
         type = types.ctDir;
       };
     };
@@ -2797,7 +2797,7 @@ let
         type = types.expression;
       };
       options.timeout = mkNullOption {
-        description = lib.mdDoc "Timeout value for sets/maps with flag **timeout** (in seconds).";
+        description = "Timeout value for sets/maps with flag **timeout** (in seconds).";
         type = lib.types.ints.unsigned;
       };
       options.expires = mkNullOption {
@@ -2821,7 +2821,7 @@ let
         type = types.osfKey;
       };
       options.ttl = mkNullOption {
-        description = lib.mdDoc "Define how the packet’s TTL value is to be matched. This property is optional. If omitted, the TTL value has to match exactly. A value of **loose** accepts TTL values less than the fingerprint one. A value of **skip** omits TTL value comparison entirely.";
+        description = "Define how the packet’s TTL value is to be matched. This property is optional. If omitted, the TTL value has to match exactly. A value of **loose** accepts TTL values less than the fingerprint one. A value of **skip** omits TTL value comparison entirely.";
         type = types.osfTtl;
       };
     };
@@ -2860,7 +2860,7 @@ let
         };
         prefix = {
           type = types.prefixExpression;
-          description = lib.mdDoc "Construct an IPv4 or IPv6 prefix consisting of address part in **addr** and prefix length in **len**.";
+          description = "Construct an IPv4 or IPv6 prefix consisting of address part in **addr** and prefix length in **len**.";
         };
         range = {
           type = types.rangeExpression;
@@ -2868,7 +2868,7 @@ let
         };
         payload = {
           type = types.payloadExpression;
-          description = lib.mdDoc ''
+          description = ''
             Construct a payload expression, i.e. a reference to a certain part of packet data. The first form creates a raw payload expression to point at a number (**len**) of bytes at a certain offset (**offset**) from a given reference point (**base**). The following base values are accepted:
 
             - **"ll"** - The offset is relative to Link Layer header start offset.
@@ -2880,7 +2880,7 @@ let
         };
         exthdr = {
           type = types.exthdrExpression;
-          description = lib.mdDoc ''
+          description = ''
             Create a reference to a field (**field**) in an IPv6 extension header (**name**). **offset** is used only for **rt0** protocol.
 
             If the **field** property is not given, the expression is to be used as a header existence check in a **match** statement with a boolean on the right hand side.
@@ -2888,7 +2888,7 @@ let
         };
         "tcp option" = {
           type = types.tcpOptionExpression;
-          description = lib.mdDoc ''
+          description = ''
             Create a reference to a field (**field**) of a TCP option header (**name**).
 
             If the **field** property is not given, the expression is to be used as a TCP option existence check in a **match** statement with a boolean on the right hand side.
@@ -2912,7 +2912,7 @@ let
         };
         rt = {
           type = types.rtExpression;
-          description = lib.mdDoc ''
+          description = ''
             Create a reference to packet routing data.
 
             The **family** property is optional and defaults to unspecified.
@@ -2920,7 +2920,7 @@ let
         };
         ct = {
           type = types.ctExpression;
-          description = lib.mdDoc ''
+          description = ''
             Create a reference to packet conntrack data.
 
             Some CT keys do not support a direction. In this case, **dir** must not be given.
@@ -2928,7 +2928,7 @@ let
         };
         numgen = {
           type = types.numgenExpression;
-          description = lib.mdDoc ''
+          description = ''
             Create a number generator.
 
             The **offset** property is optional and defaults to 0.
@@ -2968,31 +2968,31 @@ let
         };
         accept = {
           type = types.null;
-          description = lib.mdDoc "Same as the **accept** statement, but for use in verdict maps.";
+          description = "Same as the **accept** statement, but for use in verdict maps.";
         };
         drop = {
           type = types.null;
-          description = lib.mdDoc "Same as the **drop** statement, but for use in verdict maps.";
+          description = "Same as the **drop** statement, but for use in verdict maps.";
         };
         continue = {
           type = types.null;
-          description = lib.mdDoc "Same as the **continue** statement, but for use in verdict maps.";
+          description = "Same as the **continue** statement, but for use in verdict maps.";
         };
         return = {
           type = types.null;
-          description = lib.mdDoc "Same as the **return** statement, but for use in verdict maps.";
+          description = "Same as the **return** statement, but for use in verdict maps.";
         };
         jump = {
           type = types.jumpExpression;
-          description = lib.mdDoc "Same as the **jump** statement, but for use in verdict maps.";
+          description = "Same as the **jump** statement, but for use in verdict maps.";
         };
         goto = {
           type = types.gotoExpression;
-          description = lib.mdDoc "Same as the **goto** statement, but for use in verdict maps.";
+          description = "Same as the **goto** statement, but for use in verdict maps.";
         };
         elem = {
           type = types.elemExpression;
-          description = lib.mdDoc "Explicitly set element object, in case **timeout**, **expires** or **comment** are desired. Otherwise, it may be replaced by the value of **val**.";
+          description = "Explicitly set element object, in case **timeout**, **expires** or **comment** are desired. Otherwise, it may be replaced by the value of **val**.";
         };
         socket = {
           type = types.socketExpression;
@@ -3008,7 +3008,7 @@ let
         };
         "dccp option" = {
           type = types.dccpOption;
-          description = lib.mdDoc ''
+          description = ''
             Create a reference to a DCCP option (**type**).
 
             The expression is to be used as a DCCP option existence check in a **match** statement with a boolean on the right hand side.
@@ -4220,7 +4220,7 @@ in rec {
     enumMode = lib.mkOption {
       default = "normal";
       type = lib.types.str;
-      description = lib.mdDoc ''
+      description = ''
         Enum mode. "strict" to disallow using strings, "normal" for default behavior, "lax" to disable enum checks.
       '';
     };
