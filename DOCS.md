@@ -110,7 +110,7 @@ Each rule contains one or more statements. Unless the rule is a
 The following statements are supported:
 
 - `accept` - stop evaluation and accept the packet
-- `drop` - stop evaluation and accept the packet
+- `drop` - stop evaluation and drop the packet
 - `continue` - go to the next rule
 - `return` - return from the current rule and continue with the next
   rule in the previous chain
