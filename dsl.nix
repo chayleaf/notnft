@@ -433,11 +433,14 @@ self = rec {
       __functor = self: fn self.__expr__;
     }); in fn));
   in self // rec {
-    or = self."|";
+    # "or" identifier is deprecated in lix, so use OR instead
+    OR = self."|";
     xor = self."^";
     and = self."&";
     lsh = self."<<";
     rsh = self.">>";
+    "or" = OR;
+    Or = OR;
     lshift = lsh;
     rshift = lsh;
   };

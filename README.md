@@ -69,9 +69,10 @@ with notnft.dsl; with payload; ruleset {
       # is.eq is an alias for the match statement with the == operator
       # payload.tcp.flags is the same as "tcp flags" in nftables
       # language, and accesses the field "flags" of "tcp" payload
-      [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
-      [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
-      [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
+      # "or" identifier is deprecated in lix, so use OR instead
+      [(is.eq (bit.and tcp.flags (f: bit.OR f.fin f.syn)) (f: bit.OR f.fin f.syn)) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.OR f.syn f.rst)) (f: bit.OR f.syn f.rst)) drop]
+      [(is.eq (bit.and tcp.flags (f: with f; bit.OR fin syn rst psh ack urg)) 0) drop]
       # In the nftables language, you often see stuff like
       # "tcp flags syn" to check if syn is set in tcp flags, not using
       # any operator between the two values. The same logic is available

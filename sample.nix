@@ -20,9 +20,10 @@ with notnft; with dsl; with dsl.payload;
 builtins.toJSON (evalRuleset (ruleset {
   filter = add table.netdev {
     ingress_common = insert chain
-      [(is.eq (bit.and tcp.flags (f: bit.or f.fin f.syn)) (f: bit.or f.fin f.syn)) drop]
-      [(is.eq (bit.and tcp.flags (f: bit.or f.syn f.rst)) (f: bit.or f.syn f.rst)) drop]
-      [(is.eq (bit.and tcp.flags (f: with f; bit.or fin syn rst psh ack urg)) 0) drop]
+      # "or" identifier is deprecated in lix, so use OR instead
+      [(is.eq (bit.and tcp.flags (f: bit.OR f.fin f.syn)) (f: bit.OR f.fin f.syn)) drop]
+      [(is.eq (bit.and tcp.flags (f: bit.OR f.syn f.rst)) (f: bit.OR f.syn f.rst)) drop]
+      [(is.eq (bit.and tcp.flags (f: with f; bit.OR fin syn rst psh ack urg)) 0) drop]
       [(is tcp.flags (f: f.syn)) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]

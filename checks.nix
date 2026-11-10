@@ -312,9 +312,10 @@ assert chkTypeJson types.ruleset (flake.dsl.compile (flake.dsl.ruleset [
 assert chkTypeJson types.ruleset (with flake.dsl.oneEnumToRuleThemAll; with payload; ruleset {
   filter = add table.netdev {
     ingress_common = add chain [
-      [(is.eq (bit.and tcp.flags (bit.or fin syn)) (bit.or fin syn)) drop]
-      [(is.eq (bit.and tcp.flags (bit.or syn rst)) (bit.or syn rst)) drop]
-      [(is.eq (bit.and tcp.flags (bit.or fin syn rst psh ack urg)) 0) drop]
+      # "or" identifier is deprecated in lix, so use OR instead
+      [(is.eq (bit.and tcp.flags (bit.OR fin syn)) (bit.OR fin syn)) drop]
+      [(is.eq (bit.and tcp.flags (bit.OR syn rst)) (bit.OR syn rst)) drop]
+      [(is.eq (bit.and tcp.flags (bit.OR fin syn rst psh ack urg)) 0) drop]
       [(is tcp.flags syn) (is.eq tcpOpt.maxseg.size (range 0 500)) drop]
       [(is.eq ip.saddr "127.0.0.1") drop]
       [(is.eq ip6.saddr "::1") drop]
